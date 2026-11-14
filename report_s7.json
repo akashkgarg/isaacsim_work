@@ -1,0 +1,197 @@
+{
+  "belt_speed": 0.15,
+  "items": [
+    {
+      "path": "/World/Items/Part_3",
+      "kind": "cylinder",
+      "attempt": 1,
+      "pick": [
+        0.3584900200366974,
+        -0.30846336483955383,
+        0.6480168700218201
+      ],
+      "grasp_yaw_deg": -75.0,
+      "clearance": 0.03763704489039746,
+      "start_time": 1.4999999999999996,
+      "end_time": 8.933333333333357,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5697835683822632,
+        0.41649600863456726,
+        0.796999990940094
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_2",
+      "kind": "cube",
+      "attempt": 1,
+      "pick": [
+        0.47867289185523987,
+        -0.32360172271728516,
+        0.6455169320106506
+      ],
+      "grasp_yaw_deg": 68.16406615370319,
+      "clearance": 0.025642068628752318,
+      "start_time": 8.933333333333357,
+      "end_time": 17.53333333333362,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5673285126686096,
+        0.4127660393714905,
+        0.794499933719635
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_5",
+      "kind": "cylinder",
+      "attempt": 1,
+      "pick": [
+        0.3615421652793884,
+        -0.4470667839050293,
+        0.6480169296264648
+      ],
+      "grasp_yaw_deg": 75.0,
+      "clearance": 0.025277078442700378,
+      "start_time": 17.53333333333362,
+      "end_time": 27.449999999999722,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5678532719612122,
+        0.412301629781723,
+        0.796999990940094
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_0",
+      "kind": "cube",
+      "attempt": 1,
+      "pick": [
+        0.47144898772239685,
+        -0.4442812204360962,
+        0.6455168128013611
+      ],
+      "grasp_yaw_deg": -87.08806836458868,
+      "clearance": 0.035102560747062694,
+      "start_time": 27.449999999999722,
+      "end_time": 35.38333333333261,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5694405436515808,
+        0.4153379201889038,
+        0.7944999933242798
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_1",
+      "kind": "cylinder",
+      "attempt": 1,
+      "pick": [
+        0.23115985095500946,
+        -0.4448506236076355,
+        0.6480168104171753
+      ],
+      "grasp_yaw_deg": -90.0,
+      "clearance": 0.02109985095500949,
+      "start_time": 35.38333333333261,
+      "end_time": 43.54999999999881,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5689634084701538,
+        0.41379767656326294,
+        0.796999990940094
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_4",
+      "kind": "cube",
+      "attempt": 1,
+      "pick": [
+        0.23446369171142578,
+        -0.3124515414237976,
+        0.6455170512199402
+      ],
+      "grasp_yaw_deg": -64.70627685390944,
+      "clearance": 0.019652344187279375,
+      "start_time": 43.54999999999881,
+      "end_time": 51.41666666666503,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5691804885864258,
+        0.41467756032943726,
+        0.7945000529289246
+      ],
+      "on_belt": true
+    }
+  ],
+  "failures": [],
+  "delivered": [
+    "/World/Items/Part_0",
+    "/World/Items/Part_1",
+    "/World/Items/Part_2",
+    "/World/Items/Part_3",
+    "/World/Items/Part_4",
+    "/World/Items/Part_5"
+  ],
+  "measured_belt_speeds": {
+    "/World/Items/Part_0": 0.15000736713410276,
+    "/World/Items/Part_1": 0.14999231838045518,
+    "/World/Items/Part_4": 0.15002721216944376
+  },
+  "final_positions": {
+    "/World/Items/Part_0": [
+      3.541576385498047,
+      0.41643890738487244,
+      0.028244325891137123
+    ],
+    "/World/Items/Part_1": [
+      3.6023802757263184,
+      0.44176411628723145,
+      0.03074483387172222
+    ],
+    "/World/Items/Part_2": [
+      3.7482943534851074,
+      0.398307204246521,
+      0.028245573863387108
+    ],
+    "/World/Items/Part_3": [
+      3.5452048778533936,
+      0.4969390630722046,
+      0.027743825688958168
+    ],
+    "/World/Items/Part_4": [
+      3.5676162242889404,
+      0.4072343707084656,
+      0.07381860911846161
+    ],
+    "/World/Items/Part_5": [
+      3.542837619781494,
+      0.5463386178016663,
+      0.027745110914111137
+    ]
+  },
+  "sim_time": 75.56666666666366,
+  "frames": 0,
+  "summary": {
+    "items": 6,
+    "placed_on_belt": 6,
+    "delivered_to_catch_bin": 6,
+    "failed_cycles": 0
+  }
+}
