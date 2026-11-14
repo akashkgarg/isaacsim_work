@@ -1,0 +1,1010 @@
+{
+  "belt_speed": 0.15,
+  "items": [
+    {
+      "path": "/World/Items/Part_5",
+      "kind": "cylinder",
+      "attempt": 1,
+      "pick": [
+        0.2448250651359558,
+        -0.31157204508781433,
+        0.6480166912078857
+      ],
+      "grasp_yaw_deg": -90.0,
+      "clearance": 0.03476506513595584,
+      "start_time": 1.4999999999999996,
+      "end_time": 9.100000000000032,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5688610672950745,
+        0.41169488430023193,
+        0.796999990940094
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_1",
+      "kind": "cylinder",
+      "attempt": 1,
+      "pick": [
+        0.36674875020980835,
+        -0.4498135447502136,
+        0.6480169296264648
+      ],
+      "grasp_yaw_deg": 75.0,
+      "clearance": 0.03414805973789199,
+      "start_time": 9.100000000000032,
+      "end_time": 19.066666666666865,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5726360082626343,
+        0.4085747301578522,
+        0.796999990940094
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_4",
+      "kind": "cube",
+      "attempt": 1,
+      "pick": [
+        0.4826969802379608,
+        -0.4376380741596222,
+        0.6455170512199402
+      ],
+      "grasp_yaw_deg": -87.91356194693549,
+      "clearance": 0.026220415647168233,
+      "start_time": 19.066666666666865,
+      "end_time": 27.599999999999714,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5725725889205933,
+        0.4112284183502197,
+        0.794499933719635
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_3",
+      "kind": "cylinder",
+      "attempt": 1,
+      "pick": [
+        0.4795275628566742,
+        -0.31221887469291687,
+        0.6480166912078857
+      ],
+      "grasp_yaw_deg": 75.0,
+      "clearance": 0.02517033309082868,
+      "start_time": 27.599999999999714,
+      "end_time": 36.133333333332565,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5633124113082886,
+        0.41176697611808777,
+        0.796999990940094
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_2",
+      "kind": "cube",
+      "attempt": 1,
+      "pick": [
+        0.36991286277770996,
+        -0.31559479236602783,
+        0.6455170512199402
+      ],
+      "grasp_yaw_deg": -74.71839858178402,
+      "clearance": 0.04300138261027833,
+      "start_time": 36.133333333332565,
+      "end_time": 43.71666666666547,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.570960521697998,
+        0.4137493669986725,
+        0.794499933719635
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_0",
+      "kind": "cube",
+      "attempt": 1,
+      "pick": [
+        0.24251501262187958,
+        -0.4536895453929901,
+        0.6455167531967163
+      ],
+      "grasp_yaw_deg": 61.185112362932706,
+      "clearance": 0.013436968069196172,
+      "start_time": 43.71666666666547,
+      "end_time": 52.799999999998285,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5858623385429382,
+        0.4119425117969513,
+        0.794499933719635
+      ],
+      "on_belt": true
+    }
+  ],
+  "failures": [],
+  "delivered": [
+    "/World/Items/Part_0",
+    "/World/Items/Part_1",
+    "/World/Items/Part_2",
+    "/World/Items/Part_3",
+    "/World/Items/Part_4",
+    "/World/Items/Part_5"
+  ],
+  "measured_belt_speeds": {
+    "/World/Items/Part_3": 0.15004014968872922,
+    "/World/Items/Part_2": 0.15001874499851656,
+    "/World/Items/Part_0": 0.15001492036714342
+  },
+  "final_positions": {
+    "/World/Items/Part_0": [
+      3.5553488731384277,
+      0.4074873924255371,
+      0.07324456423521042
+    ],
+    "/World/Items/Part_1": [
+      3.633807420730591,
+      0.49566563963890076,
+      0.027746101841330528
+    ],
+    "/World/Items/Part_2": [
+      3.5663325786590576,
+      0.4067077040672302,
+      0.02824598364531994
+    ],
+    "/World/Items/Part_3": [
+      3.8235440254211426,
+      0.5074450373649597,
+      0.027748024091124535
+    ],
+    "/World/Items/Part_4": [
+      3.5111987590789795,
+      0.40333452820777893,
+      0.028245290741324425
+    ],
+    "/World/Items/Part_5": [
+      3.808763027191162,
+      0.3966715633869171,
+      0.02774559147655964
+    ]
+  },
+  "sim_time": 76.94999999999692,
+  "frames": 0,
+  "summary": {
+    "items": 6,
+    "placed_on_belt": 6,
+    "delivered_to_catch_bin": 6,
+    "failed_cycles": 0
+  },
+  "momentum": {
+    "median_hand_error": {
+      "commanded": {
+        "1": 0.00023223627472972723,
+        "5": 0.001296930086665603,
+        "10": 0.005812437394401852,
+        "15": 0.01429628909867588,
+        "30": 0.06155924226442118
+      },
+      "ballistic": {
+        "1": 0.0002725317930339783,
+        "5": 0.0016487212706999227,
+        "10": 0.0070993270651557305,
+        "15": 0.01968781664475995,
+        "30": 0.10777007257138706
+      }
+    },
+    "config": {
+      "horizon_steps": 30,
+      "history": 8,
+      "margin": 0.0,
+      "confirm_steps": 3,
+      "uncertainty_scale": 0.0,
+      "arm_alert_steps": null,
+      "fault": "projectile",
+      "fault_cycle": 2,
+      "guard": false
+    },
+    "faults": [
+      {
+        "t": 14.466666666666965,
+        "fault": "projectile",
+        "position": [
+          1.522097321777177,
+          0.08948921268897178,
+          1.0803080796074345
+        ],
+        "velocity": [
+          -1.9999999999999998,
+          0.0,
+          2.2525000000000004
+        ]
+      }
+    ],
+    "timing": {
+      "physics_dt_ms": 16.666666666666668,
+      "horizon_s": 0.5,
+      "sim_step": {
+        "mean_ms": 3.9811826570055135,
+        "p50_ms": 3.9843220729380846,
+        "p95_ms": 4.4821637216955414,
+        "p99_ms": 4.703186410479248,
+        "max_ms": 28.738034889101982,
+        "n": 3078
+      },
+      "policy": {
+        "mean_ms": 4.782539536230039,
+        "p50_ms": 4.714934853836894,
+        "p95_ms": 5.2861898206174365,
+        "p99_ms": 5.810850667767227,
+        "max_ms": 10.525478981435299,
+        "n": 3078
+      },
+      "apply_action": {
+        "mean_ms": 0.5624958913400527,
+        "p50_ms": 0.5458625964820385,
+        "p95_ms": 0.6481865420937537,
+        "p99_ms": 0.7655875757336617,
+        "max_ms": 1.9162283279001713,
+        "n": 3078
+      },
+      "solver_sense": {
+        "mean_ms": 0.7839052255015488,
+        "p50_ms": 0.7622598204761744,
+        "p95_ms": 0.9203458204865455,
+        "p99_ms": 1.0864914674311876,
+        "max_ms": 1.4026323333382607,
+        "n": 3078
+      },
+      "solver_predict": {
+        "mean_ms": 2.027044634778316,
+        "p50_ms": 1.9402275793254375,
+        "p95_ms": 2.4931613588705654,
+        "p99_ms": 2.7010352443903685,
+        "max_ms": 3.0534272082149982,
+        "n": 3078
+      },
+      "solver_total": {
+        "mean_ms": 2.8109498602798655,
+        "p50_ms": 2.7153368573635817,
+        "p95_ms": 3.301974618807434,
+        "p99_ms": 3.5443950537592173,
+        "max_ms": 4.299922380596399,
+        "n": 3078
+      },
+      "solver_breakdown_mean_ms": {
+        "arm_rollout": 0.5052615354373771,
+        "object_rollout": 0.2660708923420498,
+        "kinematics": 0.7837553040497852,
+        "collision": 0.4587571614417668
+      },
+      "solver_over_policy": 0.5877525609533528,
+      "solver_over_control_step": 0.30140297329405413,
+      "predicted_sim_seconds_per_wall_second": 177.8758159529102
+    },
+    "hand_prediction_error": {
+      "commanded": {
+        "1": {
+          "mean_m": 0.0006344301634173647,
+          "p95_m": 0.004212833571914588,
+          "max_m": 0.011034989563395487
+        },
+        "5": {
+          "mean_m": 0.0038078695835716964,
+          "p95_m": 0.020512773644695604,
+          "max_m": 0.0463460691746916
+        },
+        "10": {
+          "mean_m": 0.010757575141922097,
+          "p95_m": 0.04472329628282015,
+          "max_m": 0.085838409861337
+        },
+        "15": {
+          "mean_m": 0.021413496981956416,
+          "p95_m": 0.07397255670158095,
+          "max_m": 0.14226785872928774
+        },
+        "30": {
+          "mean_m": 0.07030419313832144,
+          "p95_m": 0.1858956773100872,
+          "max_m": 0.3072902421549342
+        }
+      },
+      "ballistic": {
+        "1": {
+          "mean_m": 0.00028900338702240086,
+          "p95_m": 0.000632658245302565,
+          "max_m": 0.005261503783200595
+        },
+        "5": {
+          "mean_m": 0.003485050083479107,
+          "p95_m": 0.018255338423906316,
+          "max_m": 0.04312511693834334
+        },
+        "10": {
+          "mean_m": 0.01422623270810962,
+          "p95_m": 0.06020627650513721,
+          "max_m": 0.15191625355176047
+        },
+        "15": {
+          "mean_m": 0.03375316980628016,
+          "p95_m": 0.11841477817001957,
+          "max_m": 0.3377076083855401
+        },
+        "30": {
+          "mean_m": 0.13784599291876903,
+          "p95_m": 0.4300062955401006,
+          "max_m": 1.2065794203778493
+        }
+      }
+    },
+    "object_prediction_error": {
+      "1": {
+        "mean_m": 0.00019626145592549493,
+        "p95_m": 2.480846466712351e-05,
+        "max_m": 0.05660151251479346
+      },
+      "5": {
+        "mean_m": 0.0012836542734178853,
+        "p95_m": 0.0002506920221277116,
+        "max_m": 0.2614712755206863
+      },
+      "10": {
+        "mean_m": 0.0033832045126907877,
+        "p95_m": 0.0017198720878570564,
+        "max_m": 0.5755499431147789
+      },
+      "15": {
+        "mean_m": 0.006477539614686881,
+        "p95_m": 0.01190567095879907,
+        "max_m": 1.0195495774439027
+      },
+      "30": {
+        "mean_m": 0.0197995904618399,
+        "p95_m": 0.05889664141688219,
+        "max_m": 1.620488450709067
+      }
+    },
+    "momentum_residual": {
+      "p99_quiet": 1.5695741042101377,
+      "max": 1.7975675537998923,
+      "max_at_t": 44.233333333332105
+    },
+    "expected_contacts": 31,
+    "unexpected_contacts": [
+      {
+        "t": 3.383333333333326,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 1
+      },
+      {
+        "t": 3.483333333333326,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 1
+      },
+      {
+        "t": 14.950000000000323,
+        "a": "panda_link7",
+        "b": "/World/Faults/Projectile",
+        "phase": "APPROACH_PLACE",
+        "cycle": 2
+      },
+      {
+        "t": 14.950000000000323,
+        "a": "panda_link7",
+        "b": "/World/Faults/Projectile",
+        "phase": "APPROACH_PLACE",
+        "cycle": 2
+      },
+      {
+        "t": 14.96666666666699,
+        "a": "panda_hand",
+        "b": "/World/Faults/Projectile",
+        "phase": "APPROACH_PLACE",
+        "cycle": 2
+      },
+      {
+        "t": 14.983333333333658,
+        "a": "panda_leftfinger",
+        "b": "/World/Faults/Projectile",
+        "phase": "APPROACH_PLACE",
+        "cycle": 2
+      },
+      {
+        "t": 14.983333333333658,
+        "a": "panda_leftfinger",
+        "b": "/World/Faults/Projectile",
+        "phase": "APPROACH_PLACE",
+        "cycle": 2
+      },
+      {
+        "t": 22.016666666666698,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 3
+      },
+      {
+        "t": 22.05000000000003,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 3
+      },
+      {
+        "t": 30.29999999999956,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 4
+      },
+      {
+        "t": 30.33333333333289,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 4
+      },
+      {
+        "t": 31.11666666666618,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "LIFT",
+        "cycle": 4
+      },
+      {
+        "t": 42.29999999999888,
+        "a": "carried:/World/Items/Part_2",
+        "b": "/World/Cell/Belt_0",
+        "phase": "DESCEND_PLACE",
+        "cycle": 5
+      },
+      {
+        "t": 46.74999999999863,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 6
+      },
+      {
+        "t": 46.81666666666529,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 6
+      },
+      {
+        "t": 51.34999999999837,
+        "a": "carried:/World/Items/Part_0",
+        "b": "/World/Cell/Belt_0",
+        "phase": "DESCEND_PLACE",
+        "cycle": 6
+      }
+    ],
+    "forecast": {
+      "events": [
+        {
+          "t": 3.383333333333326,
+          "end": 3.483333333333326,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.38333333333333197,
+          "episode": {
+            "start": 2.9999999999999942,
+            "end": 3.1666666666666603,
+            "steps": 11,
+            "first_time_to_collision": 0.35,
+            "predicted_contact_time": 3.3499999999999943,
+            "min_time_to_collision": 0.2833333333333333,
+            "models": [
+              "commanded"
+            ],
+            "links": [
+              "panda_hand"
+            ],
+            "obstacles": [
+              "tote_wall_+y",
+              "tote_wall_-x"
+            ],
+            "max_link_speed": 0.3667714372106544
+          }
+        },
+        {
+          "t": 14.950000000000323,
+          "end": 14.983333333333658,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Faults/Projectile"
+            ],
+            [
+              "panda_leftfinger",
+              "/World/Faults/Projectile"
+            ],
+            [
+              "panda_link7",
+              "/World/Faults/Projectile"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.4000000000000199,
+          "episode": {
+            "start": 14.550000000000303,
+            "end": 14.983333333333658,
+            "steps": 27,
+            "first_time_to_collision": 0.4,
+            "predicted_contact_time": 14.950000000000303,
+            "min_time_to_collision": 0.016666666666666666,
+            "models": [
+              "ballistic",
+              "commanded"
+            ],
+            "links": [
+              "carried:/World/Items/Part_1",
+              "panda_hand",
+              "panda_link7"
+            ],
+            "obstacles": [
+              "/World/Faults/Projectile"
+            ],
+            "max_link_speed": 0.5480111037694961
+          }
+        },
+        {
+          "t": 22.016666666666698,
+          "end": 22.05000000000003,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": false,
+          "lead_time": null,
+          "episode": null
+        },
+        {
+          "t": 30.29999999999956,
+          "end": 30.33333333333289,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.31666666666664867,
+          "episode": {
+            "start": 29.98333333333291,
+            "end": 30.016666666666243,
+            "steps": 3,
+            "first_time_to_collision": 0.36666666666666664,
+            "predicted_contact_time": 30.34999999999958,
+            "min_time_to_collision": 0.35,
+            "models": [
+              "commanded"
+            ],
+            "links": [
+              "panda_hand",
+              "panda_leftfingertip"
+            ],
+            "obstacles": [
+              "tote_stand",
+              "tote_wall_+y"
+            ],
+            "max_link_speed": 0.37705176829174064
+          }
+        },
+        {
+          "t": 31.11666666666618,
+          "end": 31.11666666666618,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.6666666666666288,
+          "episode": {
+            "start": 30.44999999999955,
+            "end": 30.549999999999546,
+            "steps": 7,
+            "first_time_to_collision": 0.4166666666666667,
+            "predicted_contact_time": 30.86666666666622,
+            "min_time_to_collision": 0.3833333333333333,
+            "models": [
+              "commanded"
+            ],
+            "links": [
+              "panda_hand",
+              "panda_leftfingertip"
+            ],
+            "obstacles": [
+              "/World/Items/Part_2",
+              "tote_stand"
+            ],
+            "max_link_speed": 0.1631183603125671
+          }
+        },
+        {
+          "t": 42.29999999999888,
+          "end": 42.29999999999888,
+          "pairs": [
+            [
+              "carried:/World/Items/Part_2",
+              "/World/Cell/Belt_0"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.46666666666664014,
+          "episode": {
+            "start": 41.83333333333224,
+            "end": 41.96666666666557,
+            "steps": 9,
+            "first_time_to_collision": 0.4166666666666667,
+            "predicted_contact_time": 42.249999999998906,
+            "min_time_to_collision": 0.35,
+            "models": [
+              "commanded"
+            ],
+            "links": [
+              "panda_leftfingertip",
+              "panda_rightfingertip"
+            ],
+            "obstacles": [
+              "conveyor"
+            ],
+            "max_link_speed": 0.43698104309945573
+          }
+        },
+        {
+          "t": 46.74999999999863,
+          "end": 46.81666666666529,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.29999999999998295,
+          "episode": {
+            "start": 46.449999999998646,
+            "end": 46.533333333331974,
+            "steps": 6,
+            "first_time_to_collision": 0.43333333333333335,
+            "predicted_contact_time": 46.883333333331976,
+            "min_time_to_collision": 0.4166666666666667,
+            "models": [
+              "commanded"
+            ],
+            "links": [
+              "panda_leftfingertip"
+            ],
+            "obstacles": [
+              "tote_stand"
+            ],
+            "max_link_speed": 0.3999406737715794
+          }
+        },
+        {
+          "t": 51.34999999999837,
+          "end": 51.34999999999837,
+          "pairs": [
+            [
+              "carried:/World/Items/Part_0",
+              "/World/Cell/Belt_0"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.46666666666664014,
+          "episode": {
+            "start": 50.88333333333173,
+            "end": 51.01666666666505,
+            "steps": 9,
+            "first_time_to_collision": 0.4166666666666667,
+            "predicted_contact_time": 51.29999999999839,
+            "min_time_to_collision": 0.3333333333333333,
+            "models": [
+              "commanded"
+            ],
+            "links": [
+              "panda_leftfingertip"
+            ],
+            "obstacles": [
+              "conveyor"
+            ],
+            "max_link_speed": 0.4753229049921912
+          }
+        }
+      ],
+      "num_events": 8,
+      "num_forecast": 7,
+      "num_alert_episodes": 20,
+      "num_false_alarm_episodes": 13,
+      "false_alarms": [
+        {
+          "start": 3.683333333333325,
+          "end": 3.7499999999999916,
+          "steps": 5,
+          "first_time_to_collision": 0.13333333333333333,
+          "predicted_contact_time": 3.8166666666666584,
+          "min_time_to_collision": 0.13333333333333333,
+          "models": [
+            "ballistic"
+          ],
+          "links": [
+            "panda_hand",
+            "panda_rightfingertip"
+          ],
+          "obstacles": [
+            "/World/Items/Part_1",
+            "tote_wall_+y"
+          ],
+          "max_link_speed": 2.2920038128961426
+        },
+        {
+          "start": 7.24999999999998,
+          "end": 7.383333333333312,
+          "steps": 9,
+          "first_time_to_collision": 0.43333333333333335,
+          "predicted_contact_time": 7.683333333333313,
+          "min_time_to_collision": 0.35,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip",
+            "panda_rightfingertip"
+          ],
+          "obstacles": [
+            "conveyor"
+          ],
+          "max_link_speed": 0.42608523877241977
+        },
+        {
+          "start": 12.56666666666687,
+          "end": 12.600000000000206,
+          "steps": 3,
+          "first_time_to_collision": 0.45,
+          "predicted_contact_time": 13.01666666666687,
+          "min_time_to_collision": 0.43333333333333335,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip"
+          ],
+          "obstacles": [
+            "tote_stand"
+          ],
+          "max_link_speed": 0.12617052893448621
+        },
+        {
+          "start": 17.150000000000308,
+          "end": 17.283333333333633,
+          "steps": 9,
+          "first_time_to_collision": 0.43333333333333335,
+          "predicted_contact_time": 17.58333333333364,
+          "min_time_to_collision": 0.3333333333333333,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip"
+          ],
+          "obstacles": [
+            "conveyor"
+          ],
+          "max_link_speed": 0.485712761284685
+        },
+        {
+          "start": 20.516666666666783,
+          "end": 20.550000000000114,
+          "steps": 3,
+          "first_time_to_collision": 0.4666666666666667,
+          "predicted_contact_time": 20.983333333333448,
+          "min_time_to_collision": 0.4666666666666667,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip"
+          ],
+          "obstacles": [
+            "tote_wall_+y"
+          ],
+          "max_link_speed": 0.7200510946186287
+        },
+        {
+          "start": 22.16666666666669,
+          "end": 22.266666666666683,
+          "steps": 7,
+          "first_time_to_collision": 0.4166666666666667,
+          "predicted_contact_time": 22.583333333333357,
+          "min_time_to_collision": 0.35,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip",
+            "panda_rightfingertip"
+          ],
+          "obstacles": [
+            "tote_stand"
+          ],
+          "max_link_speed": 0.16546537173029935
+        },
+        {
+          "start": 25.69999999999982,
+          "end": 25.81666666666648,
+          "steps": 8,
+          "first_time_to_collision": 0.4166666666666667,
+          "predicted_contact_time": 26.11666666666649,
+          "min_time_to_collision": 0.35,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip"
+          ],
+          "obstacles": [
+            "conveyor"
+          ],
+          "max_link_speed": 0.47893495370830275
+        },
+        {
+          "start": 34.24999999999934,
+          "end": 34.366666666666,
+          "steps": 8,
+          "first_time_to_collision": 0.43333333333333335,
+          "predicted_contact_time": 34.68333333333267,
+          "min_time_to_collision": 0.35,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip",
+            "panda_rightfingertip"
+          ],
+          "obstacles": [
+            "conveyor"
+          ],
+          "max_link_speed": 0.4487614424778951
+        },
+        {
+          "start": 38.116666666665786,
+          "end": 38.199999999999115,
+          "steps": 6,
+          "first_time_to_collision": 0.16666666666666666,
+          "predicted_contact_time": 38.28333333333245,
+          "min_time_to_collision": 0.16666666666666666,
+          "models": [
+            "ballistic",
+            "commanded"
+          ],
+          "links": [
+            "panda_hand",
+            "panda_rightfingertip"
+          ],
+          "obstacles": [
+            "tote_stand",
+            "tote_wall_+y"
+          ],
+          "max_link_speed": 0.8624845721667236
+        },
+        {
+          "start": 38.4999999999991,
+          "end": 38.583333333332426,
+          "steps": 6,
+          "first_time_to_collision": 0.3833333333333333,
+          "predicted_contact_time": 38.88333333333243,
+          "min_time_to_collision": 0.31666666666666665,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip",
+            "panda_rightfingertip"
+          ],
+          "obstacles": [
+            "tote_stand"
+          ],
+          "max_link_speed": 0.19658481893637259
+        },
+        {
+          "start": 46.649999999998634,
+          "end": 46.683333333331966,
+          "steps": 3,
+          "first_time_to_collision": 0.4,
+          "predicted_contact_time": 47.04999999999863,
+          "min_time_to_collision": 0.4,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_hand"
+          ],
+          "obstacles": [
+            "tote_wall_-y"
+          ],
+          "max_link_speed": 0.19489349007306014
+        },
+        {
+          "start": 46.81666666666529,
+          "end": 46.86666666666529,
+          "steps": 4,
+          "first_time_to_collision": 0.35,
+          "predicted_contact_time": 47.16666666666529,
+          "min_time_to_collision": 0.35,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip"
+          ],
+          "obstacles": [
+            "tote_stand"
+          ],
+          "max_link_speed": 0.152554552338143
+        },
+        {
+          "start": 50.233333333331764,
+          "end": 50.24999999999843,
+          "steps": 2,
+          "first_time_to_collision": 0.48333333333333334,
+          "predicted_contact_time": 50.7166666666651,
+          "min_time_to_collision": 0.48333333333333334,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "carried:/World/Items/Part_0"
+          ],
+          "obstacles": [
+            "conveyor"
+          ],
+          "max_link_speed": 0.6494797925664465
+        }
+      ],
+      "mean_lead_time": 0.4285714285714132,
+      "min_lead_time": 0.29999999999998295
+    },
+    "forecast_unconfirmed": {
+      "num_events": 8,
+      "num_forecast": 8,
+      "num_alert_episodes": 29,
+      "num_false_alarm_episodes": 21,
+      "mean_lead_time": 0.4437499999999833,
+      "min_lead_time": 0.31666666666664867
+    },
+    "guard_steps": 0
+  }
+}

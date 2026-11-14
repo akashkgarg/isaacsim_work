@@ -2,3 +2,6 @@ frames/
 preview/
 *.log
 __pycache__/
+runs/*.npz
+runs/render/*_frames*/
+runs/render/*.npz

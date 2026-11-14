@@ -6,10 +6,21 @@ parts are carried away physically. Grasps are real finger contacts (no fixed
 joints or pose writes); arm motion comes from cuMotion RMPflow through the
 maintained ``PickPlaceController`` state machine.
 
+With ``--momentum`` a momentum solver (``momentum_solver.py``) runs every control step
+next to the policy: it reads the arm's proprioception (joint state, mass matrix,
+Coriolis/gravity terms, drive gains) and the recent frames of every part, predicts arm
+and object states ``--horizon-steps`` ahead, and forecasts collisions. PhysX contact
+reports provide the ground truth the forecasts are scored against, and wall-clock
+timings of the simulator, the policy and the solver are reported side by side.
+``--fault`` injects an erroneous situation and ``--guard`` holds the arm whenever the
+policy's next action is forecast to collide.
+
 Run (from the Isaac Sim root)::
 
     ./python.sh franka_factory_pick_place.py --headless --test
     ./python.sh franka_factory_pick_place.py --save-usd franka_factory.usd
+    ./python.sh franka_factory_pick_place.py --headless --momentum --report runs/nominal.json
+    ./python.sh franka_factory_pick_place.py --headless --momentum --fault bad_action --guard
 """
 
 from __future__ import annotations
@@ -19,6 +30,7 @@ import json
 import math
 import os
 import random
+import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--headless", action="store_true")
@@ -29,10 +41,29 @@ parser.add_argument("--no-dressing", action="store_true", help="Skip decorative 
 parser.add_argument("--save-usd", default=None, help="Export the composed stage before simulation starts")
 parser.add_argument("--record", default=None, help="Directory for rendered RGB frames (needs a working renderer)")
 parser.add_argument("--record-every", type=int, default=2)
+parser.add_argument("--record-window", type=float, nargs=2, default=None, metavar=("START", "END"),
+                    help="Only save frames between these sim times (s)")
+parser.add_argument("--max-time", type=float, default=None, help="Stop the run at this sim time (s)")
+parser.add_argument("--camera", choices=("wide", "close"), default="wide", help="Recording viewpoint")
 parser.add_argument("--preview", action="store_true", help="Render stills from a few viewpoints into --record and exit")
 parser.add_argument("--report", default=None, help="Write a JSON run report to this path")
 parser.add_argument("--gpu", type=int, default=0, help="Single GPU used for rendering")
 parser.add_argument("--test", action="store_true", help="Fail with a non-zero exit code if any gate fails")
+parser.add_argument("--momentum", action="store_true", help="Run the momentum solver alongside the policy and score its forecasts")
+parser.add_argument("--horizon-steps", type=int, default=30, help="Momentum solver prediction horizon in physics steps")
+parser.add_argument("--history", type=int, default=8, help="Object frames used to estimate momentum")
+parser.add_argument("--margin", type=float, default=0.0, help="Predicted clearance (m) below which an alert is raised")
+parser.add_argument("--confirm-steps", type=int, default=3, help="Consecutive predicted-contact steps before an alert is confirmed")
+parser.add_argument("--arm-alert-steps", type=int, default=None,
+                    help="Steps of the action-conditioned arm rollout that may raise alerts (default: full horizon)")
+parser.add_argument("--uncertainty-scale", type=float, default=0.0,
+                    help="Multiplier on the solver's self-measured k-step error used as penetration tolerance (0 disables)")
+parser.add_argument("--fault", choices=("none", "intruder", "bad_action", "projectile"), default="none",
+                    help="Inject an erroneous situation: an unplanned box riding the conveyor into the drop zone, "
+                         "a corrupted policy action, or a part thrown at the gripper")
+parser.add_argument("--fault-cycle", type=int, default=2, help="Pick-and-place cycle (1-based) in which the fault fires")
+parser.add_argument("--guard", action="store_true", help="Hold the arm instead of executing an action forecast to collide")
+parser.add_argument("--trace", default=None, help="Write per-step momentum solver traces (.npz)")
 args, _ = parser.parse_known_args()
 
 from isaacsim import SimulationApp
@@ -74,7 +105,19 @@ from isaacsim.robot_motion.examples.manipulation import (
     PickPlacePhase,
 )
 from isaacsim.storage.native import get_assets_root_path
-from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics, UsdShade
+from momentum_eval import alert_episodes, contact_events, prediction_error, score, timing_stats
+from momentum_solver import (
+    FRANKA_JOINTS,
+    ArmMomentumModel,
+    Box,
+    ContactRules,
+    DriveModel,
+    FrankaKinematics,
+    MomentumSolver,
+    ObjectMomentumTracker,
+    Proprioception,
+)
+from pxr import Gf, PhysicsSchemaTools, PhysxSchema, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics, UsdShade
 
 PHYSICS_DT = 1.0 / 60.0
 
@@ -322,8 +365,13 @@ def spawn_items(stage: Usd.Stage, rng: random.Random) -> list[dict]:
     return items
 
 
-CAMERA_EYE = (2.3, -2.0, 2.0)
-CAMERA_TARGET = (0.9, 0.15, 0.75)
+CAMERA_VIEWS = {
+    "wide": ((2.3, -2.0, 2.0), (0.9, 0.15, 0.75)),
+    "close": ((1.55, -1.25, 1.55), (0.3, 0.05, 0.85)),  # tote, arm and drop zone fill the frame
+}
+CAMERA_EYE, CAMERA_TARGET = CAMERA_VIEWS[args.camera]
+CAMERA_FOCAL = 18.0
+CAMERA_RESOLUTION = (1280, 720)
 
 
 def aim_camera(stage: Usd.Stage, path: str, eye, target) -> None:
@@ -336,7 +384,7 @@ def aim_camera(stage: Usd.Stage, path: str, eye, target) -> None:
 def add_camera(stage: Usd.Stage) -> str:
     path = "/World/Cameras/CellCam"
     camera = UsdGeom.Camera.Define(stage, path)
-    camera.CreateFocalLengthAttr(18.0)
+    camera.CreateFocalLengthAttr(CAMERA_FOCAL)
     camera.CreateClippingRangeAttr(Gf.Vec2f(0.05, 200.0))
     aim_camera(stage, path, CAMERA_EYE, CAMERA_TARGET)
     return path
@@ -479,21 +527,24 @@ class Recorder:
         self.directory = directory
         self.annotator = None
         self.count = 0
+        self.times: list[float] = []
         if not directory:
             return
         try:
             import omni.replicator.core as rep
 
             os.makedirs(directory, exist_ok=True)
-            product = rep.create.render_product(camera_path, (1280, 720))
+            product = rep.create.render_product(camera_path, CAMERA_RESOLUTION)
             self.annotator = rep.AnnotatorRegistry.get_annotator("rgb")
             self.annotator.attach([product])
         except Exception as exc:  # noqa: BLE001
             print(f"[record] disabled: {exc}")
             self.annotator = None
 
-    def capture(self) -> None:
+    def capture(self, t: float | None = None) -> None:
         if self.annotator is None:
+            return
+        if t is not None and args.record_window and not (args.record_window[0] <= t <= args.record_window[1]):
             return
         data = self.annotator.get_data()
         if data is None or getattr(data, "size", 0) == 0:
@@ -501,7 +552,454 @@ class Recorder:
         from PIL import Image
 
         Image.fromarray(np.asarray(data)[..., :3]).save(os.path.join(self.directory, f"frame_{self.count:05d}.png"))
+        self.times.append(t if t is not None else math.nan)
         self.count += 1
+
+
+# ---------------------------------------------------------------------------
+# Momentum solver integration
+# ---------------------------------------------------------------------------
+
+ROBOT_PATH = "/World/Cell/Franka"
+FAULT_ROOT = "/World/Faults"
+EVAL_STEPS = (1, 5, 10, 15, 30, 60)
+INTRUDER_SIZE = (0.12, 0.12, 0.20)
+INTRUDER_MASS = 2.0
+INTRUDER_LEAD = 2.0  # seconds between spawning upstream and reaching the drop point
+PROJECTILE_RADIUS = 0.035
+PROJECTILE_MASS = 0.3
+PROJECTILE_FLIGHT = 0.5  # seconds from launch to the gripper's extrapolated position
+BAD_ACTION_DROP = 0.25  # m: the corrupted policy commands the gripper this far below the placement pose
+BAD_ACTION_WINDOW = (0.1, 1.2)  # seconds after DESCEND_PLACE starts
+CARRY_PHASES = (PickPlacePhase.APPROACH_PLACE, PickPlacePhase.DESCEND_PLACE)
+HOLDING_PHASES = (PickPlacePhase.LIFT, PickPlacePhase.APPROACH_PLACE, PickPlacePhase.DESCEND_PLACE)
+
+
+def cell_obstacles() -> list[Box]:
+    """Axis-aligned boxes for the fixed cell geometry the arm can hit."""
+    cx, cy = TOTE_CENTER_XY
+    ox, oy = KLT_HALF[1] * TOTE_SCALE[1], KLT_HALF[0] * TOTE_SCALE[0]  # tote outer half extents in world X, Y
+    rim = TOTE_STAND_TOP + 2 * KLT_HALF[2] * TOTE_SCALE[2]
+    wall_h = (rim - TOTE_STAND_TOP) / 2
+    zc = TOTE_STAND_TOP + wall_h
+    t = 0.006
+    line_half = NUM_CONVEYORS * CONVEYOR_LENGTH / 2
+    return [
+        Box("floor", (0.0, 0.0, -0.5), (50.0, 50.0, 0.5)),
+        Box("pedestal", (ROBOT_BASE[0], ROBOT_BASE[1], ROBOT_BASE[2] / 2), (0.16, 0.16, ROBOT_BASE[2] / 2)),
+        Box("tote_stand", (cx, cy, TOTE_STAND_TOP / 2), (ox + 0.03, oy + 0.03, TOTE_STAND_TOP / 2)),
+        Box("tote_wall_+x", (cx + ox - t, cy, zc), (t, oy, wall_h)),
+        Box("tote_wall_-x", (cx - ox + t, cy, zc), (t, oy, wall_h)),
+        Box("tote_wall_+y", (cx, cy + oy - t, zc), (ox, t, wall_h)),
+        Box("tote_wall_-y", (cx, cy - oy + t, zc), (ox, t, wall_h)),
+        Box("conveyor", (CONVEYOR_X0 + line_half, CONVEYOR_Y, BELT_TOP / 2), (line_half, BELT_HALF_WIDTH, BELT_TOP / 2)),
+    ]
+
+
+def item_half_extents(item: dict) -> tuple[float, float, float]:
+    """Half extents in the part's own frame (cylinders use their bounding square prism)."""
+    if item["kind"] == "cube":
+        return (ITEM_CUBE / 2,) * 3
+    return (ITEM_CYL_RADIUS, ITEM_CYL_RADIUS, ITEM_CYL_HEIGHT / 2)
+
+
+def spawn_fault_objects(stage: Usd.Stage) -> list[dict]:
+    """Pre-spawn the fault's dynamic object parked off-cell; it is teleported in when the fault fires."""
+    specs = []
+    if args.fault == "intruder":
+        path = f"{FAULT_ROOT}/Intruder"
+        Cube(path, positions=[(-3.5, 3.5, INTRUDER_SIZE[2] / 2 + 0.01)], sizes=1.0, scales=[INTRUDER_SIZE], colors=[(0.9, 0.1, 0.6)])
+        specs.append({"path": path, "mass": INTRUDER_MASS, "half": tuple(s / 2 for s in INTRUDER_SIZE)})
+    elif args.fault == "projectile":
+        from isaacsim.core.experimental.objects import Sphere
+
+        path = f"{FAULT_ROOT}/Projectile"
+        Sphere(path, positions=[(-3.5, 4.0, PROJECTILE_RADIUS + 0.01)], radii=PROJECTILE_RADIUS, colors=[(0.9, 0.1, 0.6)])
+        specs.append({"path": path, "mass": PROJECTILE_MASS, "half": (PROJECTILE_RADIUS,) * 3})
+    for spec in specs:
+        GeomPrim(spec["path"], apply_collision_apis=True)
+        RigidPrim(spec["path"])
+        UsdPhysics.MassAPI.Apply(stage.GetPrimAtPath(spec["path"])).CreateMassAttr(spec["mass"])
+    return specs
+
+
+def enable_contact_reports(stage: Usd.Stage, paths: list[str]) -> None:
+    robot_bodies = [p.GetPath().pathString for p in Usd.PrimRange(stage.GetPrimAtPath(ROBOT_PATH)) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+    for path in robot_bodies + paths:
+        api = PhysxSchema.PhysxContactReportAPI.Apply(stage.GetPrimAtPath(path))
+        api.CreateThresholdAttr().Set(0.0)
+
+
+def quat_to_matrix(position, wxyz) -> np.ndarray:
+    w, x, y, z = wxyz
+    T = np.eye(4)
+    T[:3, :3] = [
+        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+    ]
+    T[:3, 3] = position
+    return T
+
+
+class MomentumMonitor:
+    """Runs the momentum solver every control step, injects faults, and records ground-truth contacts."""
+
+    def __init__(self, scenario: ManipulationScenario, items: list[dict], item_view: RigidPrim, faults: list[dict]):
+        art = scenario.articulation
+        if list(art.dof_names) != FRANKA_JOINTS:
+            raise RuntimeError(f"Unexpected Franka joint order {art.dof_names}")
+        self.art = art
+        self.items = items
+        self.item_view = item_view
+        self.faults = faults
+        self.fault_view = RigidPrim([f["path"] for f in faults]) if faults else None
+        self.object_paths = [i["path"] for i in items] + [f["path"] for f in faults]
+
+        kp, kd = (g.numpy()[0].astype(np.float64) for g in art.get_dof_gains())
+        max_effort = art.get_dof_max_efforts().numpy()[0].astype(np.float64)
+        drive_types = art.get_dof_drive_types()[0]
+        # panda_finger_joint2 is a mimic joint without its own drive; model it as a copy of finger 1.
+        for arr in (kp, kd, max_effort):
+            arr[8] = arr[7]
+        drive = DriveModel(
+            stiffness=kp,
+            damping=kd,
+            max_effort=max_effort,
+            acceleration_drive=np.array([d == "acceleration" for d in drive_types[:8]] + [drive_types[7] == "acceleration"]),
+            gravity_enabled=bool(art.get_link_enabled_gravities().numpy()[0].any()),
+        )
+        base_p, base_q = art.get_world_poses()
+        self.base = quat_to_matrix(base_p.numpy()[0], base_q.numpy()[0])
+        self.kin = FrankaKinematics()
+        self.hand = self.kin.link_index("panda_hand")
+        tracker = ObjectMomentumTracker(
+            self.object_paths,
+            masses=np.array([ITEM_MASS] * len(items) + [f["mass"] for f in faults]),
+            half_extents=np.array([item_half_extents(i) for i in items] + [f["half"] for f in faults]),
+            window=args.history,
+        )
+        self.solver = MomentumSolver(self.kin, ArmMomentumModel(drive, PHYSICS_DT), tracker, cell_obstacles(),
+                                     args.horizon_steps, PHYSICS_DT, margin=args.margin, confirm_steps=args.confirm_steps,
+                                     uncertainty_scale=args.uncertainty_scale, commanded_alert_steps=args.arm_alert_steps)
+        self.tote_boxes = {b.name for b in self.solver.boxes if b.name.startswith("tote")}
+        self.targets_q = art.get_dof_position_targets().numpy()[0].astype(np.float64)
+        self.targets_qd = art.get_dof_velocity_targets().numpy()[0].astype(np.float64)
+
+        self.now = 0.0
+        self.cycle = 0
+        self.target: int | None = None
+        self.phase: PickPlacePhase | None = None
+        self.phase_start = 0.0
+        self.carried_offset: np.ndarray | None = None
+        self.fault_fired = False
+        self.fault_log: list[dict] = []
+        self.prev_hand: np.ndarray | None = None
+        self.contacts: list[dict] = []
+        self.expected_contacts = 0
+        self.alerts: list[dict] = []
+        self.guard_steps = 0
+        self.trace: dict[str, list] = {k: [] for k in (
+            "t", "cycle", "phase", "carried", "min_distance", "ttc", "residual", "kinetic_energy",
+            "sim_ms", "policy_ms", "sense_ms", "solve_ms", "arm_rollout_ms", "object_rollout_ms", "kinematics_ms",
+            "collision_ms", "apply_ms", "hand", "objects", "object_speed", "guarded",
+            "confirmed", "alert_point", "alert_label", "hand_path",
+        )}
+        self.hand_pred = {"commanded": {k: [] for k in EVAL_STEPS if k <= args.horizon_steps},
+                          "ballistic": {k: [] for k in EVAL_STEPS if k <= args.horizon_steps}}
+        self.object_pred = {k: [] for k in EVAL_STEPS if k <= args.horizon_steps}
+        self._subscription = None
+
+    # -- ground truth ---------------------------------------------------
+
+    def subscribe_contacts(self) -> None:
+        from omni.physics.core import ContactEventType, get_physics_simulation_interface
+
+        found = ContactEventType.CONTACT_FOUND
+
+        def on_contact(headers, _data, _anchors) -> None:
+            for h in headers:
+                if h.type == found:
+                    self._classify(str(PhysicsSchemaTools.intToSdfPath(h.actor0)), str(PhysicsSchemaTools.intToSdfPath(h.actor1)))
+
+        self._subscription = get_physics_simulation_interface().subscribe_physics_contact_report_events(on_contact)
+
+    def _classify(self, a: str, b: str) -> None:
+        if self.target is None or self.phase is None:
+            return
+        robot_a, robot_b = a.startswith(ROBOT_PATH), b.startswith(ROBOT_PATH)
+        target = self.object_paths[self.target]
+        if robot_a and robot_b:
+            return
+        if robot_a or robot_b:
+            link, other = (a, b) if robot_a else (b, a)
+            if other == target:
+                self.expected_contacts += 1
+                return
+            self.contacts.append({"t": self.now, "a": link.rsplit("/", 1)[-1], "b": other, "phase": self.phase.name, "cycle": self.cycle})
+        elif target in (a, b) and self.phase in CARRY_PHASES:
+            other = b if a == target else a
+            self.contacts.append({"t": self.now, "a": "carried:" + target, "b": other, "phase": self.phase.name, "cycle": self.cycle})
+
+    # -- per-step -------------------------------------------------------
+
+    def start_cycle(self, target: int) -> None:
+        self.cycle += 1
+        self.target = target
+        self.carried_offset = None
+
+    def sense(self) -> tuple[Proprioception, np.ndarray, np.ndarray]:
+        art = self.art
+        proprio = Proprioception(
+            q=art.get_dof_positions().numpy()[0].astype(np.float64),
+            qd=art.get_dof_velocities().numpy()[0].astype(np.float64),
+            mass_matrix=art.get_mass_matrices().numpy()[0].astype(np.float64),
+            coriolis=art.get_dof_coriolis_and_centrifugal_compensation_forces().numpy()[0].astype(np.float64),
+            gravity=art.get_dof_gravity_compensation_forces().numpy()[0].astype(np.float64),
+            base=self.base,
+        )
+        positions, orientations = (a.numpy() for a in self.item_view.get_world_poses())
+        if self.fault_view is not None:
+            fp, fq = (a.numpy() for a in self.fault_view.get_world_poses())
+            positions, orientations = np.vstack([positions, fp]), np.vstack([orientations, fq])
+        return proprio, positions.astype(np.float64), orientations.astype(np.float64)
+
+    def propose(self, desired) -> tuple[np.ndarray, np.ndarray]:
+        q_t, qd_t = self.targets_q.copy(), self.targets_qd.copy()
+        joints = desired.joints if desired is not None else None
+        if joints is not None:
+            if joints.positions is not None:
+                q_t[joints.position_indices.numpy()] = joints.positions.numpy().reshape(-1)
+            if joints.velocities is not None:
+                qd_t[joints.velocity_indices.numpy()] = joints.velocities.numpy().reshape(-1)
+        q_t[8], qd_t[8] = q_t[7], qd_t[7]
+        return q_t, qd_t
+
+    def rules(self) -> ContactRules:
+        rules = ContactRules(ignore_objects={self.target})
+        if self.phase in HOLDING_PHASES and self.carried_offset is not None:
+            rules.carried = self.target
+            rules.carried_offset = self.carried_offset
+            if self.phase is PickPlacePhase.LIFT:
+                rules.carried_ignore_boxes = set(self.tote_boxes)
+            elif self.phase is PickPlacePhase.DESCEND_PLACE:
+                rules.carried_ignore_boxes = {"conveyor"}
+        return rules
+
+    def _fault_active(self) -> bool:
+        phase = PickPlacePhase.DESCEND_PLACE if args.fault == "bad_action" else PickPlacePhase.APPROACH_PLACE
+        return args.fault != "none" and self.cycle == args.fault_cycle and self.phase is phase
+
+    def corrupt_action(self, t: float, q: np.ndarray, q_t: np.ndarray) -> bool:
+        if args.fault != "bad_action" or not self._fault_active():
+            return False
+        dt = t - self.phase_start
+        if not (BAD_ACTION_WINDOW[0] <= dt <= BAD_ACTION_WINDOW[1]):
+            return False
+        if not self.fault_fired:
+            # Joint offset that moves the hand straight down, from a finite-difference hand Jacobian.
+            eps = 1e-4
+            batch = np.repeat(q[None], 8, axis=0)
+            batch[1:, :7] += eps * np.eye(7)
+            hands = self.kin.forward(batch, self.base)[:, self.hand, :3, 3]
+            J = (hands[1:] - hands[0]).T / eps  # (3, 7)
+            self.bad_action_offset = np.linalg.pinv(J) @ np.array([0.0, 0.0, -BAD_ACTION_DROP])
+            self.fault_fired = True
+            self.fault_log.append({"t": t, "fault": "bad_action", "hand_drop_m": BAD_ACTION_DROP,
+                                   "joint_offset_rad": self.bad_action_offset.round(4).tolist()})
+        q_t[:7] += self.bad_action_offset
+        return True
+
+    def trigger_object_fault(self, t: float, hand: np.ndarray, hand_velocity: np.ndarray) -> None:
+        if self.fault_fired or self.fault_view is None or not self._fault_active():
+            return
+        index = len(self.items)
+        if args.fault == "intruder":
+            x = DROP_XY[0] - args.belt_speed * INTRUDER_LEAD
+            p0 = np.array([x, DROP_XY[1], BELT_TOP + INTRUDER_SIZE[2] / 2 + 0.002])
+            v0 = np.array([args.belt_speed, 0.0, 0.0])
+        elif args.fault == "projectile":
+            if t - self.phase_start < 0.5:
+                return
+            aim = hand + hand_velocity * PROJECTILE_FLIGHT
+            p0 = aim + np.array([1.0, 0.0, 0.1])
+            g = np.array([0.0, 0.0, -9.81])
+            v0 = (aim - p0 - 0.5 * g * PROJECTILE_FLIGHT**2) / PROJECTILE_FLIGHT
+        else:
+            return
+        self.fault_view.set_world_poses(positions=p0[None].astype(np.float32), orientations=np.array([[1.0, 0, 0, 0]], np.float32))
+        self.fault_view.set_velocities(v0[None].astype(np.float32), np.zeros((1, 3), np.float32))
+        self.solver.objects.forget(index)
+        self.fault_fired = True
+        self.fault_log.append({"t": t, "fault": args.fault, "position": p0.tolist(), "velocity": v0.tolist()})
+
+    def control_step(self, t: float, phase: PickPlacePhase, scenario: ManipulationScenario, desired, sim_ms: float, policy_ms: float) -> None:
+        if phase is not self.phase:
+            self.phase = phase
+            self.phase_start = t
+        t0 = time.perf_counter()
+        proprio, objects, orientations = self.sense()
+        t1 = time.perf_counter()
+        hand_T = self.kin.forward(proprio.q[None], self.base)[0, self.hand]
+        if phase is PickPlacePhase.LIFT and self.carried_offset is None:
+            self.carried_offset = hand_T[:3, :3].T @ (objects[self.target] - hand_T[:3, 3])
+        q_t, qd_t = self.propose(desired)
+        modified = self.corrupt_action(t, proprio.q, q_t)
+        t2 = time.perf_counter()
+        pred = self.solver.solve(t, proprio, objects, q_t, qd_t, self.rules(), orientations)
+        t3 = time.perf_counter()
+
+        guarded = False
+        if args.guard and pred.confirmed and pred.alert.model == "commanded":
+            q_t[:7], qd_t[:7] = proprio.q[:7], 0.0
+            modified = guarded = True
+            self.guard_steps += 1
+        t4 = time.perf_counter()
+        if modified:
+            self.art.set_dof_position_targets(q_t[None].astype(np.float32))
+            self.art.set_dof_velocity_targets(qd_t[None].astype(np.float32))
+        else:
+            scenario.apply_robot_state(desired)
+        self.targets_q, self.targets_qd = q_t, qd_t
+        apply_ms = (time.perf_counter() - t4) * 1e3
+
+        hand = hand_T[:3, 3]
+        hand_velocity = (hand - self.prev_hand) / PHYSICS_DT if self.prev_hand is not None else np.zeros(3)
+        self.prev_hand = hand
+        self.trigger_object_fault(t, hand, hand_velocity)
+
+        if pred.alert is not None:
+            self.alerts.append({**pred.alert.__dict__, "confirmed": pred.confirmed, "cycle": self.cycle, "phase": phase.name, "guarded": guarded})
+        tr = self.trace
+        tr["t"].append(t)
+        tr["cycle"].append(self.cycle)
+        tr["phase"].append(phase.value)
+        tr["carried"].append(self.target if phase in HOLDING_PHASES else -1)
+        tr["min_distance"].append(pred.min_distance)
+        tr["ttc"].append(pred.alert.time_to_collision if pred.alert else np.nan)
+        tr["residual"].append(pred.momentum_residual)
+        tr["kinetic_energy"].append(pred.kinetic_energy)
+        tr["sim_ms"].append(sim_ms)
+        tr["policy_ms"].append(policy_ms)
+        tr["sense_ms"].append((t1 - t0) * 1e3)
+        tr["solve_ms"].append((t3 - t2) * 1e3)
+        for key in ("arm_rollout", "object_rollout", "kinematics", "collision"):
+            tr[f"{key}_ms"].append(pred.timings_ms[key])
+        tr["apply_ms"].append(apply_ms)
+        tr["hand"].append(hand)
+        tr["objects"].append(objects)
+        tr["object_speed"].append(np.linalg.norm(self.solver.objects.velocity, axis=1))
+        tr["guarded"].append(guarded)
+        tr["confirmed"].append(pred.confirmed)
+        tr["hand_path"].append(pred.hand_commanded if pred.hand_commanded is not None else pred.hand_ballistic)
+        tr["alert_point"].append(pred.alert.point if pred.alert else (np.nan,) * 3)
+        tr["alert_label"].append(
+            f"{pred.alert.link.rsplit('/', 1)[-1]} -> {pred.alert.obstacle.rsplit('/', 1)[-1]} ({pred.alert.model})" if pred.alert else "")
+        for k in self.object_pred:
+            self.object_pred[k].append(pred.object_positions[k - 1])
+            self.hand_pred["ballistic"][k].append(pred.hand_ballistic[k - 1])
+            self.hand_pred["commanded"][k].append(pred.hand_commanded[k - 1] if pred.hand_commanded is not None else np.full(3, np.nan))
+
+    # -- report ---------------------------------------------------------
+
+    def summarize(self) -> dict:
+        tr = {k: np.asarray(v) for k, v in self.trace.items()}
+        times = tr["t"]
+        # Steps where the cycle changed are discontinuous for k-step comparisons; consecutive indices only.
+        hand_err = {model: prediction_error(times, {k: np.asarray(v) for k, v in preds.items()}, tr["hand"])
+                    for model, preds in self.hand_pred.items()}
+        n_obj = tr["objects"].shape[1] if tr["objects"].size else 0
+        moving = (tr["object_speed"] > 0.02) & (np.arange(n_obj)[None, :] != tr["carried"][:, None])
+        obj_err = prediction_error(times, {k: np.asarray(v) for k, v in self.object_pred.items()}, tr["objects"], moving)
+        episodes = alert_episodes([a for a in self.alerts if a["confirmed"]], PHYSICS_DT)
+        raw_episodes = alert_episodes(self.alerts, PHYSICS_DT)
+        events = contact_events(self.contacts)
+        horizon = args.horizon_steps * PHYSICS_DT
+        solver_ms = tr["sense_ms"] + tr["solve_ms"]
+        policy_ms = tr["policy_ms"]
+        timing = {
+            "physics_dt_ms": PHYSICS_DT * 1e3,
+            "horizon_s": horizon,
+            "sim_step": timing_stats(tr["sim_ms"].tolist()),
+            "policy": timing_stats(policy_ms.tolist()),
+            "apply_action": timing_stats(tr["apply_ms"].tolist()),
+            "solver_sense": timing_stats(tr["sense_ms"].tolist()),
+            "solver_predict": timing_stats(tr["solve_ms"].tolist()),
+            "solver_total": timing_stats(solver_ms.tolist()),
+            "solver_breakdown_mean_ms": {k: float(np.mean(tr[f"{k}_ms"])) for k in ("arm_rollout", "object_rollout", "kinematics", "collision")},
+            "solver_over_policy": float(np.mean(solver_ms) / max(np.mean(policy_ms), 1e-9)),
+            "solver_over_control_step": float(np.mean(solver_ms) / max(np.mean(tr["sim_ms"] + policy_ms + tr["apply_ms"]), 1e-9)),
+            "predicted_sim_seconds_per_wall_second": float(horizon / max(np.mean(solver_ms) * 1e-3, 1e-9)),
+        }
+        quiet = np.isnan(tr["ttc"])
+        return {
+            "median_hand_error": {model: {str(k): float(v[k - 1]) for k in self.object_pred}
+                                    for model, v in self.solver.median_error.items()},
+            "config": {"horizon_steps": args.horizon_steps, "history": args.history, "margin": args.margin,
+                       "confirm_steps": args.confirm_steps, "uncertainty_scale": args.uncertainty_scale,
+                       "arm_alert_steps": args.arm_alert_steps,
+                       "fault": args.fault, "fault_cycle": args.fault_cycle, "guard": args.guard},
+            "faults": self.fault_log,
+            "timing": timing,
+            "hand_prediction_error": hand_err,
+            "object_prediction_error": obj_err,
+            "momentum_residual": {
+                "p99_quiet": float(np.percentile(tr["residual"][quiet], 99)) if quiet.any() else None,
+                "max": float(tr["residual"].max()) if tr["residual"].size else None,
+                "max_at_t": float(times[np.argmax(tr["residual"])]) if tr["residual"].size else None,
+            },
+            "expected_contacts": self.expected_contacts,
+            "unexpected_contacts": self.contacts[:50],
+            "forecast": score(episodes, events, horizon),
+            "forecast_unconfirmed": {k: v for k, v in score(raw_episodes, events, horizon).items() if k not in ("events", "false_alarms")},
+            "guard_steps": self.guard_steps,
+        }
+
+    def save_trace(self, path: str, frame_times: list[float]) -> None:
+        data = {k: np.asarray(v) for k, v in self.trace.items()}
+        for model, preds in self.hand_pred.items():
+            for k, v in preds.items():
+                data[f"hand_{model}_{k}"] = np.asarray(v)
+        for k, v in self.object_pred.items():
+            data[f"objects_pred_{k}"] = np.asarray(v)
+        data["eval_steps"] = np.asarray(list(self.object_pred))
+        data["frame_times"] = np.asarray(frame_times, dtype=np.float64)
+        data["camera_eye"], data["camera_target"] = np.asarray(CAMERA_EYE), np.asarray(CAMERA_TARGET)
+        data["camera_focal"], data["camera_resolution"] = np.asarray(CAMERA_FOCAL), np.asarray(CAMERA_RESOLUTION)
+        data["contact_t"] = np.asarray([c["t"] for c in self.contacts])
+        data["contact_label"] = np.asarray([f"{c['a'].rsplit('/', 1)[-1]} hit {c['b'].rsplit('/', 1)[-1]}" for c in self.contacts])
+        data["object_names"] = np.asarray([p.rsplit("/", 1)[-1] for p in self.object_paths])
+        data["fault_t"] = np.asarray([f["t"] for f in self.fault_log])
+        np.savez_compressed(path, **data)
+
+
+def print_momentum_summary(m: dict) -> None:
+    t = m["timing"]
+    row = lambda name, s: print(f"[timing] {name:<16} mean {s['mean_ms']:7.3f} ms  p95 {s['p95_ms']:7.3f} ms  max {s['max_ms']:7.3f} ms")  # noqa: E731
+    print(f"[timing] physics dt {t['physics_dt_ms']:.2f} ms, prediction horizon {t['horizon_s']:.2f} s")
+    for name in ("sim_step", "policy", "apply_action", "solver_sense", "solver_predict", "solver_total"):
+        row(name, t[name])
+    print(f"[timing] solver breakdown (mean ms) {json.dumps({k: round(v, 3) for k, v in t['solver_breakdown_mean_ms'].items()})}")
+    print(f"[timing] solver/policy {t['solver_over_policy']:.2f}x, solver/full control step {t['solver_over_control_step']:.2f}x, "
+          f"predicts {t['predicted_sim_seconds_per_wall_second']:.0f} s of future per wall-clock second")
+    for model, err in m["hand_prediction_error"].items():
+        print(f"[accuracy] hand {model:<9} " + "  ".join(f"k={k}: {v['mean_m'] * 1e3:6.1f} mm" for k, v in err.items()))
+    print("[accuracy] moving objects  " + "  ".join(f"k={k}: {v['mean_m'] * 1e3:6.1f} mm" for k, v in m["object_prediction_error"].items()))
+    u = m["forecast_unconfirmed"]
+    print(f"[forecast] unconfirmed alerts: forecast {u['num_forecast']}/{u['num_events']}, episodes {u['num_alert_episodes']}, "
+          f"false alarms {u['num_false_alarm_episodes']}")
+    f = m["forecast"]
+    print(f"[forecast] confirmed alerts: unexpected contact events {f['num_events']}, forecast {f['num_forecast']}, alert episodes "
+          f"{f['num_alert_episodes']}, false alarms {f['num_false_alarm_episodes']}, mean lead {f['mean_lead_time']}")
+    for ev in f["events"]:
+        ep = ev["episode"]
+        print(f"[forecast]   contact t={ev['t']:.3f}s pairs={ev['pairs'][:3]} forecast={ev['forecast']} lead={ev['lead_time']}"
+              + (f" predicted_by={ep['models']} obstacles={ep['obstacles']} links={ep['links'][:4]}" if ep else ""))
+    for ep in f["false_alarms"][:10]:
+        print(f"[forecast]   false alarm t={ep['start']:.3f}-{ep['end']:.3f}s ttc={ep['first_time_to_collision']:.3f} "
+              f"models={ep['models']} links={ep['links'][:4]} obstacles={ep['obstacles']}")
+    print(f"[momentum] residual p99(quiet)={m['momentum_residual']['p99_quiet']} max={m['momentum_residual']['max']} "
+          f"at t={m['momentum_residual']['max_at_t']} guard_steps={m['guard_steps']} faults={m['faults']}")
 
 
 def main() -> int:
@@ -524,9 +1022,14 @@ def main() -> int:
     scenario.setup_scene()
     items = spawn_items(stage, rng)
     item_view = RigidPrim([item["path"] for item in items])
+    faults = spawn_fault_objects(stage) if args.momentum else []
+    if args.momentum:
+        enable_contact_reports(stage, [item["path"] for item in items] + [f["path"] for f in faults])
 
     scenario.initialize_world_binding(
         exclude_prim_paths=(
+            # Fault objects are unknown to the planner by design.
+            FAULT_ROOT,
             "/World/Factory",
             "/World/Dressing",
             "/World/ground_plane",
@@ -552,18 +1055,23 @@ def main() -> int:
     app_utils.play()
     simulation_app.update()
 
+    monitor = MomentumMonitor(scenario, items, item_view, faults) if args.momentum else None
+    if monitor is not None:
+        monitor.subscribe_contacts()
     sim_time = 0.0
     steps = 0
 
     def step() -> bool:
         nonlocal sim_time, steps
+        if monitor is not None:
+            monitor.now = sim_time + PHYSICS_DT
         simulation_app.update()
         if not (app_utils.is_playing() and SimulationManager.is_simulating()):
             return False
         sim_time += PHYSICS_DT
         steps += 1
         if steps % args.record_every == 0:
-            recorder.capture()
+            recorder.capture(sim_time)
         return True
 
     def poses() -> tuple[np.ndarray, np.ndarray]:
@@ -616,16 +1124,27 @@ def main() -> int:
         }
         if not controller.reset(scenario.read_robot_state(), goal, t=sim_time):
             raise RuntimeError(controller.failure_reason or "controller reset failed")
+        if monitor is not None:
+            monitor.start_cycle(index)
         max_carry_z = pick[2]
         while simulation_app.is_running() and not controller.is_done and not controller.failed:
+            if args.max_time is not None and sim_time >= args.max_time:
+                break
+            t_step = time.perf_counter()
             if not step():
                 continue
+            t_policy = time.perf_counter()
             scenario.sync_world()
             previous = controller.phase
             desired = controller.forward(scenario.read_robot_state(), goal, sim_time)
+            t_done = time.perf_counter()
             if desired is None:
                 break
-            scenario.apply_robot_state(desired)
+            if monitor is None:
+                scenario.apply_robot_state(desired)
+            else:
+                monitor.control_step(sim_time, controller.phase, scenario, desired,
+                                     sim_ms=(t_policy - t_step) * 1e3, policy_ms=(t_done - t_policy) * 1e3)
             if controller.phase is not previous and controller.phase is PickPlacePhase.DESCEND_PICK and item["path"] not in disabled:
                 # Once grasped, a part never returns to the cell; keep it out of the planning world.
                 scenario.set_planning_obstacles_enabled((item["path"],), False)
@@ -652,11 +1171,15 @@ def main() -> int:
             report["failures"].append(record)
             if attempts[index] >= 2:
                 skip.add(index)
+        if args.max_time is not None and sim_time >= args.max_time:
+            break
 
     # Let the line carry everything to the catch bin.
     catch_x0 = CONVEYOR_X0 + NUM_CONVEYORS * CONVEYOR_LENGTH
     tracking = {r["path"]: [] for r in report["items"] if r["on_belt"]}
     end_time = sim_time + (catch_x0 - DROP_XY[0]) / max(args.belt_speed, 1e-3) + 4.0
+    if args.max_time is not None:
+        end_time = min(end_time, args.max_time)
     while simulation_app.is_running() and sim_time < end_time:
         if not step():
             continue
@@ -692,6 +1215,11 @@ def main() -> int:
         "failed_cycles": len(report["failures"]),
     }
     print("[summary]", json.dumps(report["summary"]), "speeds", {k: round(v, 3) for k, v in speeds.items()})
+    if monitor is not None:
+        report["momentum"] = monitor.summarize()
+        print_momentum_summary(report["momentum"])
+        if args.trace:
+            monitor.save_trace(args.trace, recorder.times)
     if args.report:
         with open(args.report, "w") as f:
             json.dump(report, f, indent=2)

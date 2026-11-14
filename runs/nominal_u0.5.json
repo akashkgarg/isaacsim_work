@@ -1,0 +1,747 @@
+{
+  "belt_speed": 0.15,
+  "items": [
+    {
+      "path": "/World/Items/Part_5",
+      "kind": "cylinder",
+      "attempt": 1,
+      "pick": [
+        0.24482479691505432,
+        -0.3115726411342621,
+        0.6480167508125305
+      ],
+      "grasp_yaw_deg": -90.0,
+      "clearance": 0.03476479691505435,
+      "start_time": 1.4999999999999996,
+      "end_time": 9.100000000000032,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5688480734825134,
+        0.41167840361595154,
+        0.796999990940094
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_1",
+      "kind": "cylinder",
+      "attempt": 1,
+      "pick": [
+        0.36674997210502625,
+        -0.44981250166893005,
+        0.6480168700218201
+      ],
+      "grasp_yaw_deg": 75.0,
+      "clearance": 0.03414688344628285,
+      "start_time": 9.100000000000032,
+      "end_time": 19.150000000000194,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5725405216217041,
+        0.4079100787639618,
+        0.796999990940094
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_4",
+      "kind": "cube",
+      "attempt": 1,
+      "pick": [
+        0.48269742727279663,
+        -0.43763822317123413,
+        0.6455169320106506
+      ],
+      "grasp_yaw_deg": -87.91354061674464,
+      "clearance": 0.026219958874424354,
+      "start_time": 19.150000000000194,
+      "end_time": 27.683333333333042,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5726227760314941,
+        0.4145798981189728,
+        0.7944999933242798
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_3",
+      "kind": "cylinder",
+      "attempt": 1,
+      "pick": [
+        0.47952669858932495,
+        -0.31221920251846313,
+        0.6480167508125305
+      ],
+      "grasp_yaw_deg": 75.0,
+      "clearance": 0.025169355358236195,
+      "start_time": 27.683333333333042,
+      "end_time": 36.34999999999922,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5651231408119202,
+        0.41271018981933594,
+        0.796999990940094
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_2",
+      "kind": "cube",
+      "attempt": 1,
+      "pick": [
+        0.36991289258003235,
+        -0.31559470295906067,
+        0.6455169916152954
+      ],
+      "grasp_yaw_deg": -74.71844602578972,
+      "clearance": 0.043001370527455354,
+      "start_time": 36.34999999999922,
+      "end_time": 43.93333333333212,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5704265832901001,
+        0.4137621819972992,
+        0.7944999933242798
+      ],
+      "on_belt": true
+    },
+    {
+      "path": "/World/Items/Part_0",
+      "kind": "cube",
+      "attempt": 1,
+      "pick": [
+        0.24251407384872437,
+        -0.4536895751953125,
+        0.6455169320106506
+      ],
+      "grasp_yaw_deg": 61.1851461634108,
+      "clearance": 0.013436984009803034,
+      "start_time": 43.93333333333212,
+      "end_time": 53.01666666666494,
+      "controller_done": true,
+      "failure": null,
+      "lifted": true,
+      "release_position": [
+        0.5859498977661133,
+        0.41094666719436646,
+        0.794499933719635
+      ],
+      "on_belt": true
+    }
+  ],
+  "failures": [],
+  "delivered": [
+    "/World/Items/Part_0",
+    "/World/Items/Part_1",
+    "/World/Items/Part_2",
+    "/World/Items/Part_3",
+    "/World/Items/Part_4",
+    "/World/Items/Part_5"
+  ],
+  "measured_belt_speeds": {
+    "/World/Items/Part_3": 0.15002560615540403,
+    "/World/Items/Part_2": 0.1500200944788401,
+    "/World/Items/Part_0": 0.15001477854593306
+  },
+  "final_positions": {
+    "/World/Items/Part_0": [
+      3.627387046813965,
+      0.4003971815109253,
+      0.02824402041733265
+    ],
+    "/World/Items/Part_1": [
+      3.6742489337921143,
+      0.411989688873291,
+      0.027743950486183167
+    ],
+    "/World/Items/Part_2": [
+      3.5348644256591797,
+      0.5780049562454224,
+      0.028245635330677032
+    ],
+    "/World/Items/Part_3": [
+      3.8385121822357178,
+      0.6401281356811523,
+      0.02774708718061447
+    ],
+    "/World/Items/Part_4": [
+      3.5279276371002197,
+      0.43083903193473816,
+      0.0282454714179039
+    ],
+    "/World/Items/Part_5": [
+      3.7672195434570312,
+      1.003891944885254,
+      0.02774551697075367
+    ]
+  },
+  "sim_time": 77.16666666666357,
+  "frames": 0,
+  "summary": {
+    "items": 6,
+    "placed_on_belt": 6,
+    "delivered_to_catch_bin": 6,
+    "failed_cycles": 0
+  },
+  "momentum": {
+    "median_hand_error": {
+      "commanded": {
+        "1": 0.00023692775868209046,
+        "5": 0.0013231298123372592,
+        "10": 0.0056973434226712995,
+        "15": 0.014585093295879,
+        "30": 0.06034028759735456
+      },
+      "ballistic": {
+        "1": 0.00027803730045315906,
+        "5": 0.0016160744021926888,
+        "10": 0.006958750970636372,
+        "15": 0.020085536923185075,
+        "30": 0.1056360821566467
+      }
+    },
+    "config": {
+      "horizon_steps": 30,
+      "history": 8,
+      "margin": 0.0,
+      "confirm_steps": 3,
+      "uncertainty_scale": 0.5,
+      "fault": "none",
+      "fault_cycle": 2,
+      "guard": false
+    },
+    "faults": [],
+    "timing": {
+      "physics_dt_ms": 16.666666666666668,
+      "horizon_s": 0.5,
+      "sim_step": {
+        "mean_ms": 3.9796987983850998,
+        "p50_ms": 3.9720209315419197,
+        "p95_ms": 4.434911534190178,
+        "p99_ms": 4.790694918483492,
+        "max_ms": 29.4068050570786,
+        "n": 3091
+      },
+      "policy": {
+        "mean_ms": 4.62237994820217,
+        "p50_ms": 4.559297114610672,
+        "p95_ms": 4.988331347703934,
+        "p99_ms": 5.682762200012803,
+        "max_ms": 10.147832799702883,
+        "n": 3091
+      },
+      "apply_action": {
+        "mean_ms": 0.5504303930893141,
+        "p50_ms": 0.5334583111107349,
+        "p95_ms": 0.6160482298582792,
+        "p99_ms": 0.7657090201973908,
+        "max_ms": 2.001548185944557,
+        "n": 3091
+      },
+      "solver_sense": {
+        "mean_ms": 0.5564219911894013,
+        "p50_ms": 0.5370583385229111,
+        "p95_ms": 0.6362760905176401,
+        "p99_ms": 0.754442950710654,
+        "max_ms": 0.934193842113018,
+        "n": 3091
+      },
+      "solver_predict": {
+        "mean_ms": 1.9800806567506741,
+        "p50_ms": 1.8951999954879284,
+        "p95_ms": 2.465885365381837,
+        "p99_ms": 2.697409829124808,
+        "max_ms": 6.127584259957075,
+        "n": 3091
+      },
+      "solver_total": {
+        "mean_ms": 2.5365026479400754,
+        "p50_ms": 2.4449839256703854,
+        "p95_ms": 3.0335879418998957,
+        "p99_ms": 3.305062232539057,
+        "max_ms": 6.786803249269724,
+        "n": 3091
+      },
+      "solver_breakdown_mean_ms": {
+        "arm_rollout": 0.48554083799436537,
+        "object_rollout": 0.2579735134029535,
+        "kinematics": 0.7785641486129495,
+        "collision": 0.4450043502788893
+      },
+      "solver_over_policy": 0.5487438670909396,
+      "solver_over_control_step": 0.2771374067187991,
+      "predicted_sim_seconds_per_wall_second": 197.12181274719188
+    },
+    "hand_prediction_error": {
+      "commanded": {
+        "1": {
+          "mean_m": 0.0006359820664928365,
+          "p95_m": 0.004276837358810501,
+          "max_m": 0.011004244691000552
+        },
+        "5": {
+          "mean_m": 0.003810350633527255,
+          "p95_m": 0.02069891668389746,
+          "max_m": 0.04621174468755388
+        },
+        "10": {
+          "mean_m": 0.010741378527732312,
+          "p95_m": 0.044346143803855674,
+          "max_m": 0.08584420108653129
+        },
+        "15": {
+          "mean_m": 0.021365133535675224,
+          "p95_m": 0.0739546198653166,
+          "max_m": 0.1422685713956226
+        },
+        "30": {
+          "mean_m": 0.07006474514892999,
+          "p95_m": 0.1857636309003472,
+          "max_m": 0.3072818051724404
+        }
+      },
+      "ballistic": {
+        "1": {
+          "mean_m": 0.0002867446058677366,
+          "p95_m": 0.0006333230645717756,
+          "max_m": 0.005278844078998805
+        },
+        "5": {
+          "mean_m": 0.003462189234403316,
+          "p95_m": 0.01800509629676297,
+          "max_m": 0.04304695790320795
+        },
+        "10": {
+          "mean_m": 0.01416598281529551,
+          "p95_m": 0.06030360060101372,
+          "max_m": 0.15191634643845237
+        },
+        "15": {
+          "mean_m": 0.0336310389644312,
+          "p95_m": 0.1183729347163258,
+          "max_m": 0.3484948859589337
+        },
+        "30": {
+          "mean_m": 0.13751812693420992,
+          "p95_m": 0.43255917818934575,
+          "max_m": 1.2192085907406023
+        }
+      }
+    },
+    "object_prediction_error": {
+      "1": {
+        "mean_m": 0.00018253677020249154,
+        "p95_m": 8.440202712796586e-05,
+        "max_m": 0.060292717082303306
+      },
+      "5": {
+        "mean_m": 0.0010684080495660694,
+        "p95_m": 0.0018219477978194689,
+        "max_m": 0.26631483520728383
+      },
+      "10": {
+        "mean_m": 0.002695868688294746,
+        "p95_m": 0.007974358998160607,
+        "max_m": 0.5337544411407139
+      },
+      "15": {
+        "mean_m": 0.005067172086720161,
+        "p95_m": 0.02205465974490951,
+        "max_m": 0.8010174889019667
+      },
+      "30": {
+        "mean_m": 0.01503727179974219,
+        "p95_m": 0.06417131026710232,
+        "max_m": 1.6024028260556022
+      }
+    },
+    "momentum_residual": {
+      "p99_quiet": 1.5566834724275318,
+      "max": 1.792881463396304,
+      "max_at_t": 44.44999999999876
+    },
+    "expected_contacts": 31,
+    "unexpected_contacts": [
+      {
+        "t": 3.383333333333326,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 1
+      },
+      {
+        "t": 3.483333333333326,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 1
+      },
+      {
+        "t": 22.100000000000026,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 3
+      },
+      {
+        "t": 22.133333333333358,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 3
+      },
+      {
+        "t": 30.38333333333289,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 4
+      },
+      {
+        "t": 30.41666666666622,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 4
+      },
+      {
+        "t": 31.31666666666617,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "LIFT",
+        "cycle": 4
+      },
+      {
+        "t": 42.516666666665536,
+        "a": "carried:/World/Items/Part_2",
+        "b": "/World/Cell/Belt_0",
+        "phase": "DESCEND_PLACE",
+        "cycle": 5
+      },
+      {
+        "t": 46.96666666666528,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 6
+      },
+      {
+        "t": 47.033333333331946,
+        "a": "panda_hand",
+        "b": "/World/Cell/Tote",
+        "phase": "DESCEND_PICK",
+        "cycle": 6
+      },
+      {
+        "t": 51.56666666666502,
+        "a": "carried:/World/Items/Part_0",
+        "b": "/World/Cell/Belt_0",
+        "phase": "DESCEND_PLACE",
+        "cycle": 6
+      }
+    ],
+    "forecast": {
+      "events": [
+        {
+          "t": 3.383333333333326,
+          "end": 3.483333333333326,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.38333333333333197,
+          "episode": {
+            "start": 2.9999999999999942,
+            "end": 3.1666666666666603,
+            "steps": 11,
+            "first_time_to_collision": 0.35,
+            "predicted_contact_time": 3.3499999999999943,
+            "min_time_to_collision": 0.2833333333333333,
+            "models": [
+              "commanded"
+            ],
+            "links": [
+              "panda_hand"
+            ],
+            "obstacles": [
+              "tote_wall_+y",
+              "tote_wall_-x"
+            ],
+            "max_link_speed": 0.36676996116810573
+          }
+        },
+        {
+          "t": 22.100000000000026,
+          "end": 22.133333333333358,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": false,
+          "lead_time": null,
+          "episode": null
+        },
+        {
+          "t": 30.38333333333289,
+          "end": 30.41666666666622,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": false,
+          "lead_time": null,
+          "episode": null
+        },
+        {
+          "t": 31.31666666666617,
+          "end": 31.31666666666617,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": false,
+          "lead_time": null,
+          "episode": null
+        },
+        {
+          "t": 42.516666666665536,
+          "end": 42.516666666665536,
+          "pairs": [
+            [
+              "carried:/World/Items/Part_2",
+              "/World/Cell/Belt_0"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.4499999999999744,
+          "episode": {
+            "start": 42.06666666666556,
+            "end": 42.166666666665556,
+            "steps": 7,
+            "first_time_to_collision": 0.5,
+            "predicted_contact_time": 42.56666666666556,
+            "min_time_to_collision": 0.4,
+            "models": [
+              "commanded"
+            ],
+            "links": [
+              "panda_leftfingertip"
+            ],
+            "obstacles": [
+              "conveyor"
+            ],
+            "max_link_speed": 0.3994036264927604
+          }
+        },
+        {
+          "t": 46.96666666666528,
+          "end": 47.033333333331946,
+          "pairs": [
+            [
+              "panda_hand",
+              "/World/Cell/Tote"
+            ]
+          ],
+          "forecast": false,
+          "lead_time": null,
+          "episode": null
+        },
+        {
+          "t": 51.56666666666502,
+          "end": 51.56666666666502,
+          "pairs": [
+            [
+              "carried:/World/Items/Part_0",
+              "/World/Cell/Belt_0"
+            ]
+          ],
+          "forecast": true,
+          "lead_time": 0.38333333333331154,
+          "episode": {
+            "start": 51.18333333333171,
+            "end": 51.21666666666504,
+            "steps": 3,
+            "first_time_to_collision": 0.4166666666666667,
+            "predicted_contact_time": 51.599999999998374,
+            "min_time_to_collision": 0.3833333333333333,
+            "models": [
+              "commanded"
+            ],
+            "links": [
+              "panda_leftfingertip"
+            ],
+            "obstacles": [
+              "conveyor"
+            ],
+            "max_link_speed": 0.44369013910382726
+          }
+        }
+      ],
+      "num_events": 7,
+      "num_forecast": 3,
+      "num_alert_episodes": 10,
+      "num_false_alarm_episodes": 7,
+      "false_alarms": [
+        {
+          "start": 3.683333333333325,
+          "end": 3.7499999999999916,
+          "steps": 5,
+          "first_time_to_collision": 0.15,
+          "predicted_contact_time": 3.833333333333325,
+          "min_time_to_collision": 0.15,
+          "models": [
+            "ballistic"
+          ],
+          "links": [
+            "panda_hand",
+            "panda_rightfingertip"
+          ],
+          "obstacles": [
+            "/World/Items/Part_1",
+            "tote_wall_+y"
+          ],
+          "max_link_speed": 2.3025297973056285
+        },
+        {
+          "start": 7.333333333333313,
+          "end": 7.366666666666646,
+          "steps": 3,
+          "first_time_to_collision": 0.43333333333333335,
+          "predicted_contact_time": 7.766666666666646,
+          "min_time_to_collision": 0.4166666666666667,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip"
+          ],
+          "obstacles": [
+            "conveyor"
+          ],
+          "max_link_speed": 0.38734849440339714
+        },
+        {
+          "start": 17.316666666666965,
+          "end": 17.350000000000296,
+          "steps": 3,
+          "first_time_to_collision": 0.43333333333333335,
+          "predicted_contact_time": 17.7500000000003,
+          "min_time_to_collision": 0.4,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip"
+          ],
+          "obstacles": [
+            "conveyor"
+          ],
+          "max_link_speed": 0.45302636209255565
+        },
+        {
+          "start": 25.78333333333315,
+          "end": 25.89999999999981,
+          "steps": 8,
+          "first_time_to_collision": 0.4666666666666667,
+          "predicted_contact_time": 26.249999999999815,
+          "min_time_to_collision": 0.36666666666666664,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip"
+          ],
+          "obstacles": [
+            "conveyor"
+          ],
+          "max_link_speed": 0.4854553114529303
+        },
+        {
+          "start": 34.56666666666599,
+          "end": 34.583333333332654,
+          "steps": 2,
+          "first_time_to_collision": 0.4166666666666667,
+          "predicted_contact_time": 34.98333333333265,
+          "min_time_to_collision": 0.4166666666666667,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_leftfingertip"
+          ],
+          "obstacles": [
+            "conveyor"
+          ],
+          "max_link_speed": 0.4054959925030621
+        },
+        {
+          "start": 38.33333333333244,
+          "end": 38.349999999999106,
+          "steps": 2,
+          "first_time_to_collision": 0.3833333333333333,
+          "predicted_contact_time": 38.71666666666577,
+          "min_time_to_collision": 0.3833333333333333,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_hand"
+          ],
+          "obstacles": [
+            "tote_wall_+y"
+          ],
+          "max_link_speed": 0.3655321662349413
+        },
+        {
+          "start": 38.76666666666575,
+          "end": 38.783333333332415,
+          "steps": 2,
+          "first_time_to_collision": 0.4166666666666667,
+          "predicted_contact_time": 39.18333333333241,
+          "min_time_to_collision": 0.4166666666666667,
+          "models": [
+            "commanded"
+          ],
+          "links": [
+            "panda_rightfingertip"
+          ],
+          "obstacles": [
+            "tote_stand"
+          ],
+          "max_link_speed": 0.21640690070771199
+        }
+      ],
+      "mean_lead_time": 0.4055555555555393,
+      "min_lead_time": 0.38333333333331154
+    },
+    "forecast_unconfirmed": {
+      "num_events": 7,
+      "num_forecast": 3,
+      "num_alert_episodes": 13,
+      "num_false_alarm_episodes": 10,
+      "mean_lead_time": 0.4611111111110923,
+      "min_lead_time": 0.4166666666666652
+    },
+    "guard_steps": 0
+  }
+}
