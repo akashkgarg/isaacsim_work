@@ -21,6 +21,11 @@ Run (from the Isaac Sim root)::
     ./python.sh franka_factory_pick_place.py --save-usd franka_factory.usd
     ./python.sh franka_factory_pick_place.py --headless --momentum --report runs/nominal.json
     ./python.sh franka_factory_pick_place.py --headless --momentum --fault bad_action --guard
+    ./python.sh franka_factory_pick_place.py --headless --scene perceived --fault intruder
+
+``--scene perceived`` gives the solver no world knowledge: static obstacles and moving
+objects are rebuilt every step from a wrist depth camera, a fixed cell depth camera and
+joint-torque contact sensing (``scene_perception.py``). Ground truth is used for scoring only.
 """
 
 from __future__ import annotations
@@ -64,7 +69,18 @@ parser.add_argument("--fault", choices=("none", "intruder", "bad_action", "proje
 parser.add_argument("--fault-cycle", type=int, default=2, help="Pick-and-place cycle (1-based) in which the fault fires")
 parser.add_argument("--guard", action="store_true", help="Hold the arm instead of executing an action forecast to collide")
 parser.add_argument("--trace", default=None, help="Write per-step momentum solver traces (.npz)")
+parser.add_argument("--perception", action="store_true",
+                    help="Mount a wrist RGB-D camera and stream depth from it and a fixed cell depth camera")
+parser.add_argument("--capture", default=None,
+                    help="Write the raw depth + proprioception + ground-truth stream (.npz) for offline development")
+parser.add_argument("--scene", choices=("world", "perceived"), default="world",
+                    help="Obstacles for the momentum solver: ground-truth cell boxes and part poses, or a scene "
+                         "rebuilt online from the depth cameras and joint torques (scene_perception.py)")
+parser.add_argument("--depth-lag", default="auto",
+                    help="Depth latency in physics steps, or 'auto' to estimate it from the robot's own body in the cell depth")
 args, _ = parser.parse_known_args()
+if args.scene == "perceived":
+    args.momentum = args.perception = True
 
 from isaacsim import SimulationApp
 
@@ -78,8 +94,8 @@ simulation_app = SimulationApp(
         "multi_gpu": False,
         "max_gpu_count": 1,
         # Headless runs without recording never need pixels; skipping the viewport keeps RTX idle.
-        "disable_viewport_updates": args.headless and not args.record,
-        **({"renderer": "MinimalRendering"} if args.headless and not args.record else {}),
+        "disable_viewport_updates": args.headless and not (args.record or args.perception),
+        **({"renderer": "MinimalRendering"} if args.headless and not (args.record or args.perception) else {}),
     }
 )
 
@@ -116,6 +132,17 @@ from momentum_solver import (
     MomentumSolver,
     ObjectMomentumTracker,
     Proprioception,
+)
+from scene_perception import (
+    EXPECTED_TOUCH,
+    WRIST_MIN_RANGE,
+    DepthFrame,
+    LatencyEstimator,
+    PerceivedScene,
+    RobotSelfFilter,
+    backproject,
+    carried_part,
+    task_rules,
 )
 from pxr import Gf, PhysicsSchemaTools, PhysxSchema, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics, UsdShade
 
@@ -381,6 +408,54 @@ def aim_camera(stage: Usd.Stage, path: str, eye, target) -> None:
     xf.AddTransformOp().Set(view.GetInverse())
 
 
+# Depth cameras for --perception. The wrist camera mimics a RealSense D435 (87 deg horizontal field of view)
+# mounted on the side of the hand, looking along the approach axis and tilted 12 deg toward the fingers.
+WRIST_CAMERA_PATH = "/World/Cell/Franka/panda_hand/WristCam"
+WRIST_CAMERA_FOCAL = 11.0
+WRIST_CAMERA_RESOLUTION = (320, 240)
+WRIST_CAMERA_TILT = math.radians(12.0)
+WRIST_CAMERA_OFFSET = (0.065, 0.0, -0.01)  # in the panda_hand frame
+DEPTH_CELL_CAMERA_PATH = "/World/Cameras/DepthCellCam"
+DEPTH_CELL_RESOLUTION = (424, 240)
+HORIZONTAL_APERTURE = 20.955  # USD camera default (mm)
+
+
+def wrist_camera_mount() -> np.ndarray:
+    """Camera-to-hand transform. USD cameras look down their local -Z with +Y up."""
+    view = np.array([-math.sin(WRIST_CAMERA_TILT), 0.0, math.cos(WRIST_CAMERA_TILT)])
+    z = -view
+    y = np.array([math.cos(WRIST_CAMERA_TILT), 0.0, math.sin(WRIST_CAMERA_TILT)])
+    T = np.eye(4)
+    T[:3, :3] = np.column_stack([np.cross(y, z), y, z])
+    T[:3, 3] = WRIST_CAMERA_OFFSET
+    return T
+
+
+def look_at_pose(eye, target) -> np.ndarray:
+    """Camera-to-world transform for a USD camera at ``eye`` looking at ``target`` with world +Z up."""
+    eye, target = np.asarray(eye, float), np.asarray(target, float)
+    f = (target - eye) / np.linalg.norm(target - eye)
+    r = np.cross(f, (0.0, 0.0, 1.0))
+    r /= np.linalg.norm(r)
+    T = np.eye(4)
+    T[:3, :3] = np.column_stack([r, np.cross(r, f), -f])
+    T[:3, 3] = eye
+    return T
+
+
+def add_perception_cameras(stage: Usd.Stage) -> None:
+    wrist = UsdGeom.Camera.Define(stage, WRIST_CAMERA_PATH)
+    wrist.CreateFocalLengthAttr(WRIST_CAMERA_FOCAL)
+    wrist.CreateClippingRangeAttr(Gf.Vec2f(0.07, 10.0))
+    xf = UsdGeom.Xformable(wrist.GetPrim())
+    xf.ClearXformOpOrder()
+    xf.AddTransformOp().Set(Gf.Matrix4d(wrist_camera_mount().T.tolist()))
+    cell = UsdGeom.Camera.Define(stage, DEPTH_CELL_CAMERA_PATH)
+    cell.CreateFocalLengthAttr(CAMERA_FOCAL)
+    cell.CreateClippingRangeAttr(Gf.Vec2f(0.05, 20.0))
+    aim_camera(stage, DEPTH_CELL_CAMERA_PATH, *CAMERA_VIEWS["close"])
+
+
 def add_camera(stage: Usd.Stage) -> str:
     path = "/World/Cameras/CellCam"
     camera = UsdGeom.Camera.Define(stage, path)
@@ -556,6 +631,100 @@ class Recorder:
         self.count += 1
 
 
+def camera_intrinsics(focal: float, resolution: tuple[int, int]) -> np.ndarray:
+    """Pinhole matrix for a USD camera with square pixels and the default horizontal aperture."""
+    w, h = resolution
+    f = focal / HORIZONTAL_APERTURE * w
+    return np.array([[f, 0.0, w / 2], [0.0, f, h / 2], [0.0, 0.0, 1.0]])
+
+
+class DepthSensors:
+    """Depth images (distance to the image plane, m; inf where nothing is hit) from the wrist and cell cameras."""
+
+    def __init__(self):
+        import omni.replicator.core as rep
+
+        self.annotators = {}
+        products = {}
+        for name, path, res in (("wrist", WRIST_CAMERA_PATH, WRIST_CAMERA_RESOLUTION), ("cell", DEPTH_CELL_CAMERA_PATH, DEPTH_CELL_RESOLUTION)):
+            products[name] = rep.create.render_product(path, res)
+            annotator = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
+            annotator.attach([products[name]])
+            self.annotators[name] = annotator
+        self.intrinsics = {"wrist": camera_intrinsics(WRIST_CAMERA_FOCAL, WRIST_CAMERA_RESOLUTION),
+                           "cell": camera_intrinsics(CAMERA_FOCAL, DEPTH_CELL_RESOLUTION)}
+        self.resolution = {"wrist": WRIST_CAMERA_RESOLUTION, "cell": DEPTH_CELL_RESOLUTION}
+        self.cell_pose = look_at_pose(*CAMERA_VIEWS["close"])
+        self.wrist_mount = wrist_camera_mount()
+        self.depth: dict[str, np.ndarray | None] = {"wrist": None, "cell": None}
+        self.t = math.nan
+
+    def grab(self, t: float) -> None:
+        for name, annotator in self.annotators.items():
+            data = annotator.get_data()
+            w, h = self.resolution[name]
+            ok = data is not None and getattr(data, "size", 0) == w * h
+            self.depth[name] = np.array(data, dtype=np.float32).reshape(h, w) if ok else None
+        self.t = t
+
+
+class SensorCapture:
+    """Raw stream for offline development: depth, proprioception, joint torques and ground truth (evaluation only)."""
+
+    def __init__(self, monitor: "MomentumMonitor", sensors: DepthSensors):
+        self.monitor = monitor
+        self.sensors = sensors
+        self.frames: dict[str, list] = {k: [] for k in (
+            "t", "depth_wrist", "depth_cell", "q", "qd", "mass_matrix", "coriolis", "gravity", "tau_projected",
+            "tau_actuation", "q_target", "qd_target", "gt_positions", "gt_orientations", "phase", "cycle", "target")}
+
+    def record(self, t: float, sensors: DepthSensors) -> None:
+        if sensors.depth["wrist"] is None or sensors.depth["cell"] is None:
+            return
+        art, m = self.monitor.art, self.monitor
+        f = self.frames
+        f["t"].append(t)
+        f["depth_wrist"].append(sensors.depth["wrist"].astype(np.float16))
+        f["depth_cell"].append(sensors.depth["cell"].astype(np.float16))
+        f["q"].append(np.array(art.get_dof_positions().numpy()[0]))
+        f["qd"].append(np.array(art.get_dof_velocities().numpy()[0]))
+        f["mass_matrix"].append(np.array(art.get_mass_matrices().numpy()[0]))
+        f["coriolis"].append(np.array(art.get_dof_coriolis_and_centrifugal_compensation_forces().numpy()[0]))
+        f["gravity"].append(np.array(art.get_dof_gravity_compensation_forces().numpy()[0]))
+        f["tau_projected"].append(np.array(art.get_dof_projected_joint_forces().numpy()[0]))
+        f["tau_actuation"].append(np.array(art.get_dof_efforts().numpy()[0]))
+        f["q_target"].append(np.array(art.get_dof_position_targets().numpy()[0]))
+        f["qd_target"].append(np.array(art.get_dof_velocity_targets().numpy()[0]))
+        positions, orientations = (np.array(a.numpy()) for a in m.item_view.get_world_poses())
+        if m.fault_view is not None:
+            fp, fq = (np.array(a.numpy()) for a in m.fault_view.get_world_poses())
+            positions, orientations = np.vstack([positions, fp]), np.vstack([orientations, fq])
+        f["gt_positions"].append(positions)
+        f["gt_orientations"].append(orientations)
+        f["phase"].append(m.phase.value if m.phase is not None else 0)
+        f["cycle"].append(m.cycle)
+        f["target"].append(-1 if m.target is None else m.target)
+
+    def save(self, path: str) -> None:
+        m, s = self.monitor, self.sensors
+        data = {k: np.asarray(v) for k, v in self.frames.items()}
+        boxes = cell_obstacles()
+        data.update(
+            base=m.base, wrist_mount=s.wrist_mount, cell_pose=s.cell_pose,
+            K_wrist=s.intrinsics["wrist"], K_cell=s.intrinsics["cell"], dt=PHYSICS_DT,
+            object_names=np.asarray([p.rsplit("/", 1)[-1] for p in m.object_paths]),
+            object_half_extents=m.gt_half_extents,
+            gt_box_names=np.asarray([b.name for b in boxes]), gt_box_centers=np.asarray([b.center for b in boxes]),
+            gt_box_halves=np.asarray([b.half for b in boxes]),
+            contact_t=np.asarray([c["t"] for c in m.contacts]),
+            contact_link=np.asarray([c["a"] for c in m.contacts]), contact_other=np.asarray([c["b"] for c in m.contacts]),
+            fault_t=np.asarray([f["t"] for f in m.fault_log]),
+            kp=m.solver.arm.drive.stiffness, kd=m.solver.arm.drive.damping, max_effort=m.solver.arm.drive.max_effort,
+        )
+        np.savez_compressed(path, **data)
+        print(f"[capture] wrote {path} ({len(self.frames['t'])} frames)")
+
+
 # ---------------------------------------------------------------------------
 # Momentum solver integration
 # ---------------------------------------------------------------------------
@@ -571,6 +740,7 @@ PROJECTILE_MASS = 0.3
 PROJECTILE_FLIGHT = 0.5  # seconds from launch to the gripper's extrapolated position
 BAD_ACTION_DROP = 0.25  # m: the corrupted policy commands the gripper this far below the placement pose
 BAD_ACTION_WINDOW = (0.1, 1.2)  # seconds after DESCEND_PLACE starts
+PERCEIVED_SLOTS = 8  # object slots the perceived scene can track at once
 CARRY_PHASES = (PickPlacePhase.APPROACH_PLACE, PickPlacePhase.DESCEND_PLACE)
 HOLDING_PHASES = (PickPlacePhase.LIFT, PickPlacePhase.APPROACH_PLACE, PickPlacePhase.DESCEND_PLACE)
 
@@ -673,16 +843,42 @@ class MomentumMonitor:
         self.base = quat_to_matrix(base_p.numpy()[0], base_q.numpy()[0])
         self.kin = FrankaKinematics()
         self.hand = self.kin.link_index("panda_hand")
-        tracker = ObjectMomentumTracker(
-            self.object_paths,
-            masses=np.array([ITEM_MASS] * len(items) + [f["mass"] for f in faults]),
-            half_extents=np.array([item_half_extents(i) for i in items] + [f["half"] for f in faults]),
-            window=args.history,
-        )
-        self.solver = MomentumSolver(self.kin, ArmMomentumModel(drive, PHYSICS_DT), tracker, cell_obstacles(),
+        self.gt_half_extents = np.array([item_half_extents(i) for i in items] + [f["half"] for f in faults])
+        self.sensors: DepthSensors | None = None
+        self.scene: PerceivedScene | None = None
+        if args.scene == "perceived":
+            # No world knowledge: the solver tracks anonymous object slots and starts with no boxes.
+            self.scene = PerceivedScene(self.kin, PHYSICS_DT, n_slots=PERCEIVED_SLOTS)
+            tracker = ObjectMomentumTracker([f"obj_{i}" for i in range(PERCEIVED_SLOTS)], np.full(PERCEIVED_SLOTS, ITEM_MASS),
+                                            np.full((PERCEIVED_SLOTS, 3), 0.02), window=args.history)
+            boxes = []
+        else:
+            tracker = ObjectMomentumTracker(
+                self.object_paths,
+                masses=np.array([ITEM_MASS] * len(items) + [f["mass"] for f in faults]),
+                half_extents=self.gt_half_extents,
+                window=args.history,
+            )
+            boxes = cell_obstacles()
+        self.solver = MomentumSolver(self.kin, ArmMomentumModel(drive, PHYSICS_DT), tracker, boxes,
                                      args.horizon_steps, PHYSICS_DT, margin=args.margin, confirm_steps=args.confirm_steps,
                                      uncertainty_scale=args.uncertainty_scale, commanded_alert_steps=args.arm_alert_steps)
         self.tote_boxes = {b.name for b in self.solver.boxes if b.name.startswith("tote")}
+        # Recent (time, joint positions, phase), oldest first: the depth frames show the robot as
+        # it was ``lag`` steps ago, so it must be filtered out at that pose. The lag depends on
+        # load, so by default it is estimated online.
+        self.history: list[tuple[float, np.ndarray, PickPlacePhase | None]] = []
+        self.latency = LatencyEstimator(RobotSelfFilter(self.kin, inflate=0.01)) if args.depth_lag == "auto" else None
+        self.lag = self.latency.lag if self.latency is not None else int(args.depth_lag)
+        self.lag_locked_t: float | None = None if self.latency is not None else 0.0
+        self.goal_pick: np.ndarray | None = None
+        self.goal_place: np.ndarray | None = None
+        self.perceived_trace: dict[str, list] = {k: [] for k in ("t", "slots", "slot_half", "perception_ms", "n_boxes", "touch", "lag")}
+        self.box_snapshots: list[tuple[float, np.ndarray, np.ndarray]] = []
+        self.pending_resets: set[int] = set()
+        self.perceived_t = math.nan
+        self.perception_ms = 0.0
+        self.perception_stages: list[dict] = []
         self.targets_q = art.get_dof_position_targets().numpy()[0].astype(np.float64)
         self.targets_qd = art.get_dof_velocity_targets().numpy()[0].astype(np.float64)
 
@@ -743,10 +939,12 @@ class MomentumMonitor:
 
     # -- per-step -------------------------------------------------------
 
-    def start_cycle(self, target: int) -> None:
+    def start_cycle(self, target: int, pick: tuple, place: tuple) -> None:
+        """Begin a pick-and-place cycle. ``pick``/``place`` are the policy's goal positions."""
         self.cycle += 1
         self.target = target
         self.carried_offset = None
+        self.goal_pick, self.goal_place = np.asarray(pick, dtype=np.float64), np.asarray(place, dtype=np.float64)
 
     def sense(self) -> tuple[Proprioception, np.ndarray, np.ndarray]:
         art = self.art
@@ -829,9 +1027,92 @@ class MomentumMonitor:
             return
         self.fault_view.set_world_poses(positions=p0[None].astype(np.float32), orientations=np.array([[1.0, 0, 0, 0]], np.float32))
         self.fault_view.set_velocities(v0[None].astype(np.float32), np.zeros((1, 3), np.float32))
-        self.solver.objects.forget(index)
+        if self.scene is None:
+            self.solver.objects.forget(index)
         self.fault_fired = True
         self.fault_log.append({"t": t, "fault": args.fault, "position": p0.tolist(), "velocity": v0.tolist()})
+
+    def perceive(self, t: float) -> None:
+        """Update the perceived scene from this step's depth images and joint torques.
+
+        Runs every physics step (also while the cell settles and between cycles), like a
+        real perception loop would. Only robot sensing and the policy's own goal (pick and
+        place positions) are used.
+        """
+        tp = time.perf_counter()
+        art = self.art
+        q = art.get_dof_positions().numpy()[0].astype(np.float64)
+        qd = art.get_dof_velocities().numpy()[0].astype(np.float64)
+        M = art.get_mass_matrices().numpy()[0].astype(np.float64)
+        c = art.get_dof_coriolis_and_centrifugal_compensation_forces().numpy()[0].astype(np.float64)
+        g = art.get_dof_gravity_compensation_forces().numpy()[0].astype(np.float64)
+        tau = art.get_dof_projected_joint_forces().numpy()[0].astype(np.float64)
+        hand_T = self.kin.forward(q[None], self.base)[0, self.hand]
+        phase = self.phase
+        self.history.append((t, q.copy(), phase))
+        est = self.latency
+        del self.history[:-((est.max_lag if est is not None else self.lag) + 1)]
+        s = self.sensors
+        q_uncertain = None
+        if est is not None:
+            q_hist = np.array([h[1] for h in reversed(self.history)])  # newest first
+            if s.depth["cell"] is not None:
+                cell_pts = backproject(s.depth["cell"], s.intrinsics["cell"], s.cell_pose, stride=4)
+                self.lag = est.update(cell_pts, self.kin.forward(q_hist, self.base))
+            if est.locked and self.lag_locked_t is None:
+                self.lag_locked_t = t
+            if not est.locked:
+                q_uncertain = q_hist
+        t_s, q_s, phase_s = self.history[max(len(self.history) - 1 - self.lag, 0)]
+        hand_s = self.kin.forward(q_s[None], self.base)[0, self.hand]
+
+        frames = []
+        # The wrist pose depends on the lag, so the wrist camera waits until the lag is known.
+        if s.depth["wrist"] is not None and q_uncertain is None:
+            wrist = np.where(s.depth["wrist"] < WRIST_MIN_RANGE, np.inf, s.depth["wrist"])
+            frames.append(DepthFrame(wrist, s.intrinsics["wrist"], hand_s @ s.wrist_mount))
+        if s.depth["cell"] is not None:
+            frames.append(DepthFrame(s.depth["cell"], s.intrinsics["cell"], s.cell_pose))
+
+        center, radius, offset = carried_part(q, hand_T)
+        center_s, radius_s, _ = carried_part(q_s, hand_s)
+        name = phase.name if phase is not None else ""
+        sc = self.scene
+        _, exclude = task_rules(name, sc.boxes, sc.object_positions, self.goal_pick, self.goal_place, offset, radius)
+        sc.update(t, frames, q, qd, M, c, g, tau, self.base,
+                  carried=(center, radius + 0.01) if phase in HOLDING_PHASES else None, exclude=exclude,
+                  expected_touch=name in EXPECTED_TOUCH, t_sensor=t_s, q_sensor=q_s,
+                  carried_sensor=(center_s, radius_s + 0.01) if phase_s in HOLDING_PHASES else None,
+                  q_uncertain=q_uncertain)
+        if sc.boxes_changed:
+            self.solver.set_boxes(sc.boxes)
+            self.box_snapshots.append((t, np.array([b.center for b in sc.boxes]).reshape(-1, 3),
+                                       np.array([b.half for b in sc.boxes]).reshape(-1, 3)))
+        # The object tracker is fed by the solver, which only runs during control steps; slots
+        # reassigned in between must still lose their history.
+        self.pending_resets |= set(sc.slots.reset_slots)
+        self.solver.objects.half_extents[:] = sc.object_half
+        self.perceived_t = t
+        self.perception_ms = (time.perf_counter() - tp) * 1e3
+        self.perception_stages.append({**sc.timings_ms, "all": self.perception_ms})
+
+    def perceived_inputs(self, phase: PickPlacePhase, hand_T: np.ndarray, q: np.ndarray) -> tuple[np.ndarray, ContactRules]:
+        """Object-slot positions and contact rules for the solver from the latest perceived scene."""
+        sc = self.scene
+        for slot in self.pending_resets:
+            self.solver.objects.forget(slot)
+        self.pending_resets = set()
+        _, radius, offset = carried_part(q, hand_T)
+        rules, _ = task_rules(phase.name, sc.boxes, sc.object_positions, self.goal_pick, self.goal_place, offset, radius)
+        pt = self.perceived_trace
+        pt["t"].append(self.now)
+        pt["slots"].append(sc.object_positions.copy())
+        pt["slot_half"].append(sc.object_half.copy())
+        pt["n_boxes"].append(len(sc.boxes))
+        pt["lag"].append(self.lag)
+        touched = sc.touches and sc.touches[-1]["t"] == self.perceived_t
+        pt["touch"].append(sc.touches[-1]["point"] if touched else (np.nan,) * 3)
+        return sc.object_positions, rules
 
     def control_step(self, t: float, phase: PickPlacePhase, scenario: ManipulationScenario, desired, sim_ms: float, policy_ms: float) -> None:
         if phase is not self.phase:
@@ -845,8 +1126,15 @@ class MomentumMonitor:
             self.carried_offset = hand_T[:3, :3].T @ (objects[self.target] - hand_T[:3, 3])
         q_t, qd_t = self.propose(desired)
         modified = self.corrupt_action(t, proprio.q, q_t)
+        perception_ms = 0.0
+        if self.scene is not None:
+            positions, rules = self.perceived_inputs(phase, hand_T, proprio.q)
+            perception_ms = self.perception_ms
+            orient, object_time = None, self.scene.object_time
+        else:
+            positions, rules, orient, object_time = objects, self.rules(), orientations, None
         t2 = time.perf_counter()
-        pred = self.solver.solve(t, proprio, objects, q_t, qd_t, self.rules(), orientations)
+        pred = self.solver.solve(t, proprio, positions, q_t, qd_t, rules, orient, object_time=object_time)
         t3 = time.perf_counter()
 
         guarded = False
@@ -881,8 +1169,12 @@ class MomentumMonitor:
         tr["kinetic_energy"].append(pred.kinetic_energy)
         tr["sim_ms"].append(sim_ms)
         tr["policy_ms"].append(policy_ms)
-        tr["sense_ms"].append((t1 - t0) * 1e3)
+        # Perceived mode: reading ground-truth poses above is for scoring only; sensing is perception.
+        tr["sense_ms"].append(perception_ms if self.scene is not None else (t1 - t0) * 1e3)
         tr["solve_ms"].append((t3 - t2) * 1e3)
+        if self.scene is not None:
+            self.perceived_trace["perception_ms"].append(perception_ms)
+            self.perceived_trace.setdefault("slot_pred", []).append(pred.object_positions[[k - 1 for k in self.object_pred]])
         for key in ("arm_rollout", "object_rollout", "kinematics", "collision"):
             tr[f"{key}_ms"].append(pred.timings_ms[key])
         tr["apply_ms"].append(apply_ms)
@@ -896,7 +1188,8 @@ class MomentumMonitor:
         tr["alert_label"].append(
             f"{pred.alert.link.rsplit('/', 1)[-1]} -> {pred.alert.obstacle.rsplit('/', 1)[-1]} ({pred.alert.model})" if pred.alert else "")
         for k in self.object_pred:
-            self.object_pred[k].append(pred.object_positions[k - 1])
+            if self.scene is None:
+                self.object_pred[k].append(pred.object_positions[k - 1])
             self.hand_pred["ballistic"][k].append(pred.hand_ballistic[k - 1])
             self.hand_pred["commanded"][k].append(pred.hand_commanded[k - 1] if pred.hand_commanded is not None else np.full(3, np.nan))
 
@@ -908,9 +1201,12 @@ class MomentumMonitor:
         # Steps where the cycle changed are discontinuous for k-step comparisons; consecutive indices only.
         hand_err = {model: prediction_error(times, {k: np.asarray(v) for k, v in preds.items()}, tr["hand"])
                     for model, preds in self.hand_pred.items()}
-        n_obj = tr["objects"].shape[1] if tr["objects"].size else 0
-        moving = (tr["object_speed"] > 0.02) & (np.arange(n_obj)[None, :] != tr["carried"][:, None])
-        obj_err = prediction_error(times, {k: np.asarray(v) for k, v in self.object_pred.items()}, tr["objects"], moving)
+        if self.scene is None:
+            n_obj = tr["objects"].shape[1] if tr["objects"].size else 0
+            moving = (tr["object_speed"] > 0.02) & (np.arange(n_obj)[None, :] != tr["carried"][:, None])
+            obj_err = prediction_error(times, {k: np.asarray(v) for k, v in self.object_pred.items()}, tr["objects"], moving)
+        else:
+            obj_err = {}  # perceived slots have no fixed identity to compare with ground-truth objects
         episodes = alert_episodes([a for a in self.alerts if a["confirmed"]], PHYSICS_DT)
         raw_episodes = alert_episodes(self.alerts, PHYSICS_DT)
         events = contact_events(self.contacts)
@@ -953,6 +1249,33 @@ class MomentumMonitor:
             "forecast": score(episodes, events, horizon),
             "forecast_unconfirmed": {k: v for k, v in score(raw_episodes, events, horizon).items() if k not in ("events", "false_alarms")},
             "guard_steps": self.guard_steps,
+            "scene": args.scene,
+            **({"perception": self.perception_summary()} if self.scene is not None else {}),
+        }
+
+    def perception_summary(self) -> dict:
+        """Perceived-scene statistics, scored against ground truth (evaluation only)."""
+        from perception_replay import map_metrics, tracking_error
+
+        pt = {k: np.asarray(v) for k, v in self.perceived_trace.items()}
+        tr = self.trace
+        gt = {"gt_positions": np.asarray(tr["objects"]), "t": np.asarray(tr["t"]), "phase": np.asarray(tr["phase"]),
+              "target": np.asarray([c if c >= 0 else -1 for c in tr["carried"]]), "object_names": np.asarray(self.object_paths),
+              "object_half_extents": self.gt_half_extents}
+        boxes = cell_obstacles()
+        gt.update(gt_box_names=np.asarray([b.name for b in boxes]), gt_box_centers=np.asarray([b.center for b in boxes]),
+                  gt_box_halves=np.asarray([b.half for b in boxes]))
+        last = len(tr["t"]) - 1
+        return {
+            "perception_ms": timing_stats(pt["perception_ms"].tolist()) if pt["perception_ms"].size else None,
+            "perception_stages_mean_ms": {k: float(np.mean([s.get(k, 0.0) for s in self.perception_stages]))
+                                          for k in (self.perception_stages[0] if self.perception_stages else {})},
+            "final_boxes": int(pt["n_boxes"][-1]) if pt["n_boxes"].size else 0,
+            "map": map_metrics(self.scene.boxes, gt, last),
+            "tracking": tracking_error(gt, pt["slots"], lag=pt["lag"]),
+            "depth_lag": {"final": int(self.lag), "histogram": np.bincount(pt["lag"]).tolist() if pt["lag"].size else [],
+                          "locked_at_s": self.lag_locked_t},
+            "touches": len(self.scene.touches),
         }
 
     def save_trace(self, path: str, frame_times: list[float]) -> None:
@@ -970,6 +1293,14 @@ class MomentumMonitor:
         data["contact_label"] = np.asarray([f"{c['a'].rsplit('/', 1)[-1]} hit {c['b'].rsplit('/', 1)[-1]}" for c in self.contacts])
         data["object_names"] = np.asarray([p.rsplit("/", 1)[-1] for p in self.object_paths])
         data["fault_t"] = np.asarray([f["t"] for f in self.fault_log])
+        if self.scene is not None:
+            for k, v in self.perceived_trace.items():
+                data[f"perceived_{k}"] = np.asarray(v)
+            # Box snapshots, flattened: rows box_offsets[i]:box_offsets[i+1] belong to time box_t[i].
+            data["box_t"] = np.asarray([s[0] for s in self.box_snapshots])
+            data["box_offsets"] = np.cumsum([0] + [len(s[1]) for s in self.box_snapshots])
+            data["box_centers"] = np.vstack([s[1] for s in self.box_snapshots]) if self.box_snapshots else np.zeros((0, 3))
+            data["box_halves"] = np.vstack([s[2] for s in self.box_snapshots]) if self.box_snapshots else np.zeros((0, 3))
         np.savez_compressed(path, **data)
 
 
@@ -998,6 +1329,15 @@ def print_momentum_summary(m: dict) -> None:
     for ep in f["false_alarms"][:10]:
         print(f"[forecast]   false alarm t={ep['start']:.3f}-{ep['end']:.3f}s ttc={ep['first_time_to_collision']:.3f} "
               f"models={ep['models']} links={ep['links'][:4]} obstacles={ep['obstacles']}")
+    if "perception" in m:
+        p = m["perception"]
+        print(f"[perception] mean {p['perception_ms']['mean_ms']:.1f} ms/step, boxes {p['final_boxes']}, map precision "
+              f"{p['map']['precision']} coverage {p['map']['coverage']:.2f}, touches {p['touches']}")
+        print(f"[perception] stages (mean ms) {json.dumps({k: round(v, 2) for k, v in p['perception_stages_mean_ms'].items()})}")
+        print(f"[perception] depth lag {json.dumps(p['depth_lag'])}")
+        for name, s in p["tracking"].items():
+            print(f"[perception]   track {name.rsplit('/', 1)[-1]}: detected {s['detected_frac']:.2f} of {s['steps_moving']} moving steps, "
+                  f"median error {s['median_error_m']}")
     print(f"[momentum] residual p99(quiet)={m['momentum_residual']['p99_quiet']} max={m['momentum_residual']['max']} "
           f"at t={m['momentum_residual']['max_at_t']} guard_steps={m['guard_steps']} faults={m['faults']}")
 
@@ -1017,6 +1357,8 @@ def main() -> int:
     if not args.no_dressing:
         build_dressing(stage, assets_root)
     camera_path = add_camera(stage)
+    if args.perception:
+        add_perception_cameras(stage)
 
     scenario = ManipulationScenario("franka", robot_prim_path="/World/Cell/Franka", offset=ROBOT_BASE)
     scenario.setup_scene()
@@ -1051,6 +1393,7 @@ def main() -> int:
         print(f"[scene] exported {os.path.abspath(args.save_usd)}")
 
     recorder = Recorder(camera_path, args.record)
+    sensors = DepthSensors() if args.perception else None
     simulation_app.update()
     app_utils.play()
     simulation_app.update()
@@ -1058,6 +1401,8 @@ def main() -> int:
     monitor = MomentumMonitor(scenario, items, item_view, faults) if args.momentum else None
     if monitor is not None:
         monitor.subscribe_contacts()
+        monitor.sensors = sensors
+    capture = SensorCapture(monitor, sensors) if args.capture and sensors is not None and monitor is not None else None
     sim_time = 0.0
     steps = 0
 
@@ -1072,6 +1417,12 @@ def main() -> int:
         steps += 1
         if steps % args.record_every == 0:
             recorder.capture(sim_time)
+        if sensors is not None:
+            sensors.grab(sim_time)
+            if capture is not None:
+                capture.record(sim_time, sensors)
+            if monitor is not None and monitor.scene is not None:
+                monitor.perceive(sim_time)
         return True
 
     def poses() -> tuple[np.ndarray, np.ndarray]:
@@ -1125,7 +1476,7 @@ def main() -> int:
         if not controller.reset(scenario.read_robot_state(), goal, t=sim_time):
             raise RuntimeError(controller.failure_reason or "controller reset failed")
         if monitor is not None:
-            monitor.start_cycle(index)
+            monitor.start_cycle(index, pick, place)
         max_carry_z = pick[2]
         while simulation_app.is_running() and not controller.is_done and not controller.failed:
             if args.max_time is not None and sim_time >= args.max_time:
@@ -1220,6 +1571,8 @@ def main() -> int:
         print_momentum_summary(report["momentum"])
         if args.trace:
             monitor.save_trace(args.trace, recorder.times)
+        if capture is not None:
+            capture.save(args.capture)
     if args.report:
         with open(args.report, "w") as f:
             json.dump(report, f, indent=2)

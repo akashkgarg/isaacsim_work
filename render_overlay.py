@@ -8,6 +8,9 @@ Usage::
 Draws, per frame: the solver's predicted hand path over its horizon (green clear, orange forecast contact,
 red confirmed), predicted object paths for moving objects, the predicted contact point, the realised hand
 trail, fault/contact/guard banners, a timing HUD, and a clearance/TTC strip with a time cursor.
+
+For ``--scene perceived`` traces it also draws the perceived static boxes (blue wireframes), the tracked
+object slots with their predicted paths (magenta), and torque-localized touches (yellow star).
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ PHASES = ["", "APPROACH_PICK", "DESCEND_PICK", "GRASP", "LIFT", "APPROACH_PLACE"
 
 # BGR
 GREEN, ORANGE, RED, CYAN, WHITE, GREY, YELLOW = (80, 220, 80), (0, 160, 255), (40, 40, 240), (255, 220, 0), (255, 255, 255), (170, 170, 170), (0, 230, 255)
+MAGENTA = (255, 80, 255)
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 
@@ -70,6 +74,25 @@ def polyline(img, px, ok, color, thick=2):
     pts = px[ok].astype(np.int32)
     if len(pts) >= 2:
         cv2.polylines(img, [pts], False, color, thick, cv2.LINE_AA)
+
+
+_BOX_EDGES = [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)]
+_BOX_CORNERS = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)], dtype=float)
+
+
+def wire_boxes(img, cam, centers, halves, color, thick=1, alpha=1.0):
+    """Wireframes of axis-aligned boxes; ``alpha`` < 1 blends them into the frame."""
+    if len(centers) == 0:
+        return
+    corners = centers[:, None, :] + halves[:, None, :] * _BOX_CORNERS[None]  # (B, 8, 3)
+    px, ok = cam.project(corners)
+    layer = img.copy() if alpha < 1.0 else img
+    for b in range(len(centers)):
+        for a, c in _BOX_EDGES:
+            if ok[b, a] and ok[b, c]:
+                cv2.line(layer, tuple(int(v) for v in px[b, a]), tuple(int(v) for v in px[b, c]), color, thick, cv2.LINE_AA)
+    if alpha < 1.0:
+        cv2.addWeighted(layer, alpha, img, 1.0 - alpha, 0, img)
 
 
 class Strip:
@@ -133,6 +156,7 @@ def main() -> None:
     names = d["object_names"]
     contact_t, contact_label, fault_t = d["contact_t"], d["contact_label"], d["fault_t"]
     pred_keys = sorted(int(k) for k in d["eval_steps"])
+    perceived = "perceived_slots" in d
 
     for n, (path, tf) in enumerate(zip(files, frame_t)):
         img = cv2.imread(path)
@@ -144,9 +168,31 @@ def main() -> None:
         px, ok = cam.project(trail)
         polyline(img, px, ok, GREY, 1)
 
+        if perceived:
+            # Perceived static boxes (latest snapshot); the floor is skipped to keep the view readable.
+            b = int(np.clip(np.searchsorted(d["box_t"], t[i], side="right") - 1, 0, len(d["box_t"]) - 1)) if len(d["box_t"]) else -1
+            if b >= 0:
+                lo, hi = d["box_offsets"][b], d["box_offsets"][b + 1]
+                C, H = d["box_centers"][lo:hi], d["box_halves"][lo:hi]
+                keep = C[:, 2] + H[:, 2] > 0.06
+                wire_boxes(img, cam, C[keep], H[keep], (230, 180, 60), 1, 0.55)
+            # Tracked object slots and the solver's predicted path for each.
+            slots, half = d["perceived_slots"][i], d["perceived_slot_half"][i]
+            live = np.isfinite(slots[:, 0])
+            wire_boxes(img, cam, slots[live], half[live], MAGENTA, 2)
+            if "perceived_slot_pred" in d:
+                for s in np.flatnonzero(live):
+                    path3 = np.concatenate([slots[s][None], d["perceived_slot_pred"][i][:, s]])
+                    px, ok = cam.project(path3)
+                    polyline(img, px, ok, MAGENTA, 1)
+            if np.all(np.isfinite(d["perceived_touch"][i])):
+                (p,), (o,) = cam.project(d["perceived_touch"][i][None])
+                if o:
+                    cv2.drawMarker(img, tuple(int(v) for v in p), YELLOW, cv2.MARKER_STAR, 22, 2, cv2.LINE_AA)
+
         # predicted object paths (only objects that are actually moving)
         for j in range(d["objects"].shape[1]):
-            if d["object_speed"][i, j] < 0.05:
+            if perceived or d["object_speed"][i, j] < 0.05:
                 continue
             path3 = np.concatenate([d["objects"][i, j][None]] + [d[f"objects_pred_{k}"][i, j][None] for k in pred_keys])
             px, ok = cam.project(path3)
@@ -195,6 +241,10 @@ def main() -> None:
             f"solver {np.mean(d['solve_ms'][sl]):.2f} ms   policy {np.mean(d['policy_ms'][sl]):.2f} ms   "
             f"horizon {hp.shape[0]} steps ({hp.shape[0] / 60:.2f} s)",
         ]
+        if perceived:
+            hud.append(f"perceived scene: {int(d['perceived_n_boxes'][i])} boxes, "
+                       f"{int(np.isfinite(d['perceived_slots'][i][:, 0]).sum())} objects, perception "
+                       f"{np.mean(d['perceived_perception_ms'][sl]):.1f} ms")
         for row, s in enumerate(hud):
             if s:
                 text(img, s, (14, 28 + 26 * row), 0.6 if row else 0.75, WHITE, 2 if row == 0 else 1)

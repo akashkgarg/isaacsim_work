@@ -5,3 +5,7 @@ __pycache__/
 runs/*.npz
 runs/render/*_frames*/
 runs/render/*.npz
+runs/perception/
+runs/perceived/*.npz
+runs/perceived/**/*.npz
+runs/perceived/render/*_frames*/

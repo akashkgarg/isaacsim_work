@@ -818,6 +818,10 @@ class ContactRules:
     carried: int | None = None  # object rigidly attached to the hand
     carried_offset: np.ndarray | None = None  # carried object center in the hand frame
     carried_ignore_boxes: set[str] = field(default_factory=set)  # surfaces the carried object may touch (placing)
+    # Radius of the carried-part sphere. If None, the carried object's smallest half extent is
+    # used. Set it when the carried part is not a tracked object (``carried`` < 0), e.g. when the
+    # part's size comes from the finger opening.
+    carried_radius: float | None = None
 
 
 class MomentumSolver:
@@ -882,8 +886,7 @@ class MomentumSolver:
         self.arm = arm
         self.objects = objects
         self.boxes = boxes
-        self.box_center = np.array([b.center for b in boxes], dtype=np.float64)
-        self.box_half = np.array([b.half for b in boxes], dtype=np.float64)
+        self.set_boxes(boxes)
         self.horizon_steps = horizon_steps
         self.ballistic_alert_steps = min(ballistic_alert_steps, horizon_steps)
         self.commanded_alert_steps = min(commanded_alert_steps or horizon_steps, horizon_steps)
@@ -902,6 +905,12 @@ class MomentumSolver:
         self._target_history: list[tuple[float, np.ndarray]] = []  # recent commanded velocity targets
         self._last_commanded_qd: np.ndarray | None = None  # one-step-ahead velocity predicted last call
         self._streak = 0  # consecutive steps with a predicted hit
+
+    def set_boxes(self, boxes: list[Box]) -> None:
+        """Replace the static obstacles, e.g. with a freshly perceived map."""
+        self.boxes = list(boxes)
+        self.box_center = np.array([b.center for b in self.boxes], dtype=np.float64).reshape(-1, 3)
+        self.box_half = np.array([b.half for b in self.boxes], dtype=np.float64).reshape(-1, 3)
 
     def joint_acceleration(self, t: float, qd: np.ndarray) -> np.ndarray:
         """Measured joint acceleration, by finite difference over the last 4 velocity samples.
@@ -985,6 +994,7 @@ class MomentumSolver:
         qd_target: np.ndarray | None,
         rules: ContactRules,
         object_orientations: np.ndarray | None = None,
+        object_time: float | None = None,
     ) -> Prediction:
         """Run one prediction step. Call once per control step, *before* applying the command.
 
@@ -996,6 +1006,9 @@ class MomentumSolver:
                 ``None`` to run the ballistic model only.
             rules: Which contacts are expected right now.
             object_orientations: Tracked object quaternions ``(N, 4)``, WXYZ.
+            object_time: Time at which ``object_positions`` were observed, if earlier than ``t``
+                (e.g. camera latency). Object predictions are then extrapolated over the
+                extra delay so they still line up with the arm's horizon.
 
         Returns:
             A :class:`Prediction`. ``prediction.confirmed`` is the signal a guard should act on.
@@ -1036,8 +1049,9 @@ class MomentumSolver:
         timings["arm_rollout"] = (t1 - t0) * 1e3
 
         # ---- 2. Object rollout ----------------------------------------------
-        self.objects.update(t, object_positions, object_orientations)
-        obj_pred = self.objects.predict(horizon)  # (H, N, 3)
+        t_obs = t if object_time is None else object_time
+        self.objects.update(t_obs, object_positions, object_orientations)
+        obj_pred = self.objects.predict(horizon + (t - t_obs))  # (H, N, 3)
         t2 = time.perf_counter()
         timings["object_rollout"] = (t2 - t1) * 1e3
 
@@ -1132,12 +1146,18 @@ class MomentumSolver:
             hand_T = links[:, :, self.hand_index]  # (R, H, 4, 4)
             carried = np.einsum("rhij,j->rhi", hand_T[..., :3, :3], rules.carried_offset) + hand_T[..., :3, 3]
             spheres = np.concatenate([spheres, carried[:, :, None, :]], axis=2)
-            # The smallest half extent keeps the vertical clearance exact for upright parts.
-            radii = np.append(radii, float(np.min(self.objects.half_extents[rules.carried])))
-            sphere_names.append("carried:" + self.objects.names[rules.carried])
+            tracked = 0 <= rules.carried < N
+            if rules.carried_radius is not None:
+                radius = rules.carried_radius
+            else:
+                # The smallest half extent keeps the vertical clearance exact for upright parts.
+                radius = float(np.min(self.objects.half_extents[rules.carried]))
+            radii = np.append(radii, radius)
+            sphere_names.append("carried:" + (self.objects.names[rules.carried] if tracked else "part"))
             # The carried part may touch itself, the placing surface, and ignored objects.
             row = np.zeros((1, B + N), dtype=bool)
-            row[0, B + rules.carried] = True
+            if tracked:
+                row[0, B + rules.carried] = True
             for j, b in enumerate(self.boxes):
                 row[0, j] = b.name in rules.carried_ignore_boxes
             for i in rules.ignore_objects:

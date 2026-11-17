@@ -130,3 +130,67 @@ The windows used for the other runs:
 | nominal | none | `27 34` | `34.5` |
 
 Add `--slow 2` to `render_overlay.py` for half-speed playback. Rendering five runs in parallel on one GPU takes about 7 minutes.
+
+## Perceived scene (`runs/perceived/`)
+
+With `--scene perceived` the solver gets no world knowledge. Everything it collides against is rebuilt on the fly from robot sensing:
+
+- **Depth:** RGB-D from the wrist camera and the fixed cell camera.
+- **Proprioception:** joint positions, velocities and commands, plus the dynamics model.
+- **Torque sensing:** measured joint torques, used to detect and localise touches.
+- **The policy's own pick and place goals:** used to decide which contacts are expected.
+
+Ground truth is read only to score the result.
+
+How the scene is built, in `scene_perception.py`:
+
+1. **Back-project and filter the robot.** Each depth frame becomes a point cloud. Points on the robot are removed with a set of spheres posed at the joint state the frame was captured at, swept ±1 step. Flying pixels at depth edges are dropped.
+2. **Estimate the depth latency.** The renderer delivers depth a few steps late, and how late depends on load. It is 1 step for a plain run, 2 steps while also recording video, and 4 steps when only capturing. `LatencyEstimator` measures it online from the robot's own body in the cell camera: for each candidate lag it counts depth points inside the robot spheres posed that many steps ago, and keeps a running sum of how far each lag falls short of the best one. It locks after about 2 s. Until then, only the cell camera is fused, and the robot is filtered at every candidate lag so it cannot leak into the map.
+3. **Build a voxel map.** A 3 cm log-odds grid separates the static scene from foreground. A voxel counts as dynamic only if it was consistently free before, is not flickering (conveyor rollers), and is not just a static surface spilling across a voxel boundary.
+4. **Extract boxes and objects.** Static voxels become axis-aligned boxes for the solver. Foreground voxels are clustered and tracked into 8 object slots, which feed the solver's object momentum tracker exactly as true object poses do in world mode. A slot is published after 3 consecutive matches.
+5. **Fuse touches.** An unexpected torque spike is localised on the arm and added to the map as an obstacle.
+
+Each step costs 41–48 ms of perception, mostly map update and back-projection, on top of a 2–3 ms solve.
+
+Results from live runs, compared with world mode over the same length:
+
+| Run | Perceived forecast | Perceived false alarms | Perceived mean lead | World forecast | World false alarms | World mean lead | Map precision | Depth lag (steps) |
+|---|---|---|---|---|---|---|---|---|
+| [intruder](runs/perceived/render/intruder.mp4) | 3/3 | 15 | 0.68 s | 3/3 | 5 | 0.72 s | 0.87 | 2 |
+| [projectile](runs/perceived/render/projectile.mp4) | 2/2 | 8 | 0.43 s | 2/2 | 4 | 0.39 s | 0.89 | 1–3 |
+| [bad_action](runs/perceived/render/bad_action.mp4) | 3/3 | 8 | 0.55 s | 3/3 | 3 | 0.53 s | 0.76 | 2–3 |
+| [nominal](runs/perceived/render/nominal.mp4) | 4/4 | 18 | 0.51 s | 3/4 | 8 | 0.46 s | 0.83 | 2 |
+
+How to read the table:
+
+- **Map precision** is the fraction of perceived box volume that lies within 3 cm of a real surface. Coverage of the real surfaces is 0.93 in every run.
+- **Forecasting:** every unexpected contact was forecast, with lead times matching world mode.
+- **Fault objects:** the intruder box was detected on 95% of its moving steps and the thrown part on 81%, with median position errors of 5 cm.
+- **The perceived runs above also record video.** That adds render load and raises the latency to 2 steps. The same intruder run without recording locked at 1 step and had 7 false alarms with map precision 0.89.
+- **False alarms are the remaining gap:** about 2–3 times as many as world mode. Most last 1–3 frames and come from short-lived foreground "objects" 0.3–0.5 m from the hand, likely brief leaks from the arm body or belt. That cause has not been confirmed.
+
+Overlay additions:
+
+- **Blue wireframes:** perceived static boxes. The floor is not drawn.
+- **Magenta boxes:** tracked object slots, with their predicted paths.
+- **Stars:** torque-localised touches.
+- **HUD line:** box count, object count and perception time.
+
+Ground-truth object paths are not drawn in perceived mode.
+
+Reproducing a perceived run, here the intruder:
+
+```bash
+export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json OMP_NUM_THREADS=1
+/home/builder/isaacsim/python.sh franka_factory_pick_place.py --headless --gpu 2 --scene perceived --fault intruder \
+    --camera close --record runs/perceived/render/intruder_frames --record-window 10 20 --max-time 20.5 \
+    --trace runs/perceived/intruder_trace.npz --report runs/perceived/intruder.json
+/home/builder/isaacsim/python.sh render_overlay.py runs/perceived/intruder_trace.npz \
+    runs/perceived/render/intruder_frames runs/perceived/render/intruder.mp4 --title "Perceived scene: intruder box"
+```
+
+For world-mode baselines, replace `--scene perceived` with `--momentum`.
+
+`perception_replay.py` replays raw captures offline. Captures are made with `--perception --capture runs/perception/<name>_raw.npz`. Replays use the same estimator and accept `--lag auto` (the default) or a fixed lag. `test_scene_perception.py` holds the unit tests.
+
+Leave `CUDA_VISIBLE_DEVICES` unset and pick the GPU with `--gpu`. A Vulkan device-lost error ("GPU crash is detected") makes the node health check fail, and Karpenter replaces the node about 10 minutes later. When that happens, stop launching runs and push your work.
