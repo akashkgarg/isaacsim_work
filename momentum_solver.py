@@ -822,6 +822,23 @@ class ContactRules:
     # used. Set it when the carried part is not a tracked object (``carried`` < 0), e.g. when the
     # part's size comes from the finger opening.
     carried_radius: float | None = None
+    # Expected contacts with a static distance field (see MomentumSolver.static_field), which has
+    # no named boxes to ignore. Each region is (world center, radius): a sphere whose center lies
+    # within radius + its own radius of the center may touch the field. ``static_ignore`` applies
+    # to every sphere (e.g. around the part being grasped), ``carried_static_ignore`` only to the
+    # carried part (the tote while lifting it out, the belt while placing it).
+    static_ignore: list[tuple[np.ndarray, float]] = field(default_factory=list)
+    carried_static_ignore: list[tuple[np.ndarray, float]] = field(default_factory=list)
+
+
+class StaticField:
+    """Interface of a static signed distance field the solver can check against instead of boxes."""
+
+    name = "map"
+
+    def distance(self, points: np.ndarray) -> np.ndarray:
+        """Signed distance (m) from each point ``(P, 3)`` to the nearest static surface."""
+        raise NotImplementedError
 
 
 class MomentumSolver:
@@ -905,6 +922,8 @@ class MomentumSolver:
         self._target_history: list[tuple[float, np.ndarray]] = []  # recent commanded velocity targets
         self._last_commanded_qd: np.ndarray | None = None  # one-step-ahead velocity predicted last call
         self._streak = 0  # consecutive steps with a predicted hit
+        # Optional static scene as a distance field (e.g. a perceived ESDF), checked alongside the boxes.
+        self.static_field: StaticField | None = None
 
     def set_boxes(self, boxes: list[Box]) -> None:
         """Replace the static obstacles, e.g. with a freshly perceived map."""
@@ -1167,6 +1186,11 @@ class MomentumSolver:
         for r, (_, _, steps) in enumerate(rollouts):
             spheres[r, steps:] = np.nan  # steps beyond a model's alert horizon never hit
 
+        field_d = None
+        if self.static_field is not None:
+            carried_index = spheres.shape[2] - 1 if spheres.shape[2] > S else None
+            field_d = self._field_distance(spheres, radii, rules, carried_index)  # (R, H, S')
+
         # Broad phase: keep obstacles whose world AABB overlaps the swept AABB of all spheres.
         valid = np.isfinite(spheres[..., 0])
         lo = np.min(np.where(valid[..., None], spheres - radii[:, None], np.inf), axis=(0, 1, 2))
@@ -1179,7 +1203,7 @@ class MomentumSolver:
         # Two AABBs overlap iff their intervals overlap on all three axes. Obstacles that
         # every sphere ignores are dropped too.
         keep = np.flatnonzero(np.all((o_lo <= hi) & (o_hi >= lo), axis=1) & ~ignore.all(axis=0))
-        if keep.size == 0:
+        if keep.size == 0 and field_d is None:
             return None, math.inf
 
         # Narrow phase per axis on contiguous (K, R, H, S') arrays in each obstacle's frame.
@@ -1203,6 +1227,10 @@ class MomentumSolver:
         # Masked-out steps (NaN) and expected contacts become +inf: "never a hit".
         d = np.where(np.isnan(d) | ignore[None, None][..., keep], np.inf, d)
         names = [names[o] for o in keep]
+        if field_d is not None:
+            # The static field is one more obstacle column.
+            d = np.concatenate([d, field_d[..., None]], axis=3)
+            names.append(self.static_field.name)
         min_dist = float(np.min(d))
 
         # Find the earliest step at which any sphere penetrates any obstacle, per rollout,
@@ -1226,3 +1254,24 @@ class MomentumSolver:
                          distance=float(d[r, k, s, o]), link_speed=float(np.linalg.norm(spheres[r, k, s] - prev) / self.dt),
                          arm_kinetic_energy=energy, point=tuple(float(v) for v in spheres[r, k, s]))
         return best, min_dist
+
+    def _field_distance(self, spheres: np.ndarray, radii: np.ndarray, rules: ContactRules,
+                        carried_index: int | None) -> np.ndarray:
+        """Signed clearance ``(R, H, S')`` of every sphere to the static field, +inf where a hit is expected.
+
+        Masked-out spheres (NaN centers) are not queried. A sphere inside an ignore region of
+        ``rules`` may touch the field, so its clearance becomes +inf.
+        """
+        pts = spheres.reshape(-1, 3)
+        finite = np.isfinite(pts[:, 0])
+        dist = np.full(len(pts), np.inf)
+        if finite.any():
+            dist[finite] = self.static_field.distance(pts[finite])
+        d = dist.reshape(spheres.shape[:3]) - radii
+        for center, radius in rules.static_ignore:
+            d = np.where(np.linalg.norm(spheres - center, axis=-1) <= radius + radii, np.inf, d)
+        if carried_index is not None:
+            for center, radius in rules.carried_static_ignore:
+                near = np.linalg.norm(spheres[..., carried_index, :] - center, axis=-1) <= radius + radii[carried_index]
+                d[..., carried_index] = np.where(near, np.inf, d[..., carried_index])
+        return d

@@ -193,4 +193,24 @@ For world-mode baselines, replace `--scene perceived` with `--momentum`.
 
 `perception_replay.py` replays raw captures offline. Captures are made with `--perception --capture runs/perception/<name>_raw.npz`. Replays use the same estimator and accept `--lag auto` (the default) or a fixed lag. `test_scene_perception.py` holds the unit tests.
 
+### cuRobo backend (`runs/curobo/`)
+
+`--perception-backend curobo` (live) or `--backend curobo` (replay) replaces the voxel map and box extraction with cuRobo's TSDF fusion and ESDF (`curobo_scene.py`). The robot filter, latency estimator, object slots and touch localisation are unchanged. The solver queries the ESDF directly (`MomentumSolver.static_field`, obstacle name `map`), with the pick and place regions exempted through `ContactRules.static_ignore`/`carried_static_ignore` instead of being cut out of the boxes.
+
+Foreground is a depth pixel at least 3 cm in front of the map rendered from the same camera, or, for the fixed camera, a return where that pixel had only ever seen open background. Foreground is dropped if it lies within 3 cm of the robot spheres or within 1.5 cm of a mapped surface; the second rule removes conveyor-roller flicker and wrist misregistration. Foreground is fused as static once its 3 cm cell has held foreground for 1.5 s.
+
+Offline replays of the four raw captures (`bash runs/curobo/run_all.sh`, then `python.sh runs/curobo/compare.py`):
+
+| Capture | World forecast / false alarms | Voxel forecast / false alarms | cuRobo forecast / false alarms | Fault-object detection, voxel vs cuRobo |
+|---|---|---|---|---|
+| intruder | 3/3, 4 | 3/3, 11 | 3/3, 3 | 0.95 vs 0.96 |
+| projectile | 2/2, 4 | 2/2, 10 | 2/2, 3 | 0.80 vs 0.70 |
+| bad_action | 3/3, 3 | 3/3, 8 | 3/3, 2 | |
+| nominal | 3/4, 8 | 4/4, 13 | 4/4, 11 | |
+| **total** | 11/12, 19 | 12/12, 42 | 12/12, 19 | |
+
+Map precision is 0.79 for cuRobo and 0.80 for voxel, and coverage is 0.94 for both. Lead times match within 0.1 s. Perception takes about 20 ms per step, against about 30 ms for voxel. `runs/curobo/sweep.sh <tag> '<json kwargs>'` replays all captures with other `CuroboPerceivedScene` parameters. Faster frustum decay (0.93, 0.90) adds false alarms.
+
+cuRobo v0.9 is installed with `pip install --target ~/isaacsim_work/deps/site "~/isaacsim_work/deps/curobo[cu13-torch]"`. Replays run under `PYTHONPATH=~/isaacsim_work/deps/site /home/builder/isaacsim/kit/python/bin/python3`. The live script appends `--curobo-site` to `sys.path`. A first live attempt hit the Vulkan device-lost crash during startup, so live numbers are still to come.
+
 Leave `CUDA_VISIBLE_DEVICES` unset and pick the GPU with `--gpu`. A Vulkan device-lost error ("GPU crash is detected") makes the node health check fail, and Karpenter replaces the node about 10 minutes later. When that happens, stop launching runs and push your work.

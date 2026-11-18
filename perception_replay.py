@@ -133,8 +133,60 @@ def map_metrics(boxes: list[Box], d: dict, step: int, workspace=((-0.3, -0.8, 0.
     return {"boxes": len(boxes), "precision": precision, "coverage": float(near.mean())}
 
 
+def gt_top_surface(d: dict, workspace=((-0.3, -0.8, 0.0), (1.1, 0.9, 1.4))) -> np.ndarray:
+    """Top-face samples (3 cm grid) of every ground-truth cell box except the floor, inside the workspace."""
+    surf = []
+    lo, hi = np.asarray(workspace[0]), np.asarray(workspace[1])
+    for name, c, h in zip(d["gt_box_names"], d["gt_box_centers"], d["gt_box_halves"]):
+        if name == "floor":
+            continue
+        xs = np.arange(c[0] - h[0], c[0] + h[0] + 1e-9, 0.03)
+        ys = np.arange(c[1] - h[1], c[1] + h[1] + 1e-9, 0.03)
+        g = np.stack(np.meshgrid(xs, ys, indexing="ij"), -1).reshape(-1, 2)
+        surf.append(np.column_stack([g, np.full(len(g), c[2] + h[2])]))
+    surf = np.vstack(surf)
+    return surf[np.all((surf >= lo) & (surf <= hi), axis=1)]
+
+
+def field_metrics(field, d: dict, step: int, workspace=((-0.3, -0.8, 0.0), (1.1, 0.9, 1.4))) -> dict:
+    """Coverage and precision of a static distance field, comparable to :func:`map_metrics`.
+
+    * precision: fraction of 2 cm grid points the field puts on or inside a surface
+      (distance < 1 cm) that lie within 3 cm of real geometry;
+    * coverage: fraction of real top-surface samples where the field's distance is under 3 cm.
+    """
+    lo, hi = np.asarray(workspace[0]), np.asarray(workspace[1])
+    axes = [np.arange(lo[i], hi[i], 0.02) for i in range(3)]
+    grid = np.stack(np.meshgrid(*axes, indexing="ij"), -1).reshape(-1, 3)
+    occupied = grid[field.occupied(grid, 0.01) if hasattr(field, "occupied") else field.distance(grid) < 0.01]
+    precision = float(np.mean(gt_distance(occupied, d, step) < 0.03)) if len(occupied) else None
+    surf = gt_top_surface(d, workspace)
+    coverage = float(np.mean(np.abs(field.distance(surf)) < 0.03))
+    return {"boxes": 0, "occupied_points": int(len(occupied)), "precision": precision, "coverage": coverage}
+
+
+class BoxField:
+    """Distance field of a box list, so box maps can be scored with :func:`field_metrics`."""
+
+    def __init__(self, boxes: list[Box]):
+        self.boxes = boxes
+
+    def distance(self, points: np.ndarray) -> np.ndarray:
+        if not self.boxes:
+            return np.full(len(points), np.inf)
+        return np.min(np.stack([sphere_box_distance(points, 0.0, np.asarray(b.center), np.asarray(b.half))
+                                for b in self.boxes], 1), axis=1)
+
+    def occupied(self, points: np.ndarray, tol: float) -> np.ndarray:
+        """Points within ``tol`` of a box (an AABB test per box, much cheaper than distances)."""
+        out = np.zeros(len(points), dtype=bool)
+        for b in self.boxes:
+            out |= np.all(np.abs(points - np.asarray(b.center)) <= np.asarray(b.half) + tol, axis=1)
+        return out
+
+
 def run(d: dict, mode: str = "perceived", lag: int | None = None, horizon: int = 30, verbose: bool = True,
-        noise_floor: np.ndarray | None = None) -> dict:
+        noise_floor: np.ndarray | None = None, backend: str = "voxel", scene_kwargs: dict | None = None) -> dict:
     kin = FrankaKinematics()
     dt = float(d["dt"])
     base = d["base"]
@@ -146,7 +198,15 @@ def run(d: dict, mode: str = "perceived", lag: int | None = None, horizon: int =
     names = list(d["object_names"])
 
     n_slots = 8
-    if mode == "perceived":
+    if mode == "perceived" and backend == "curobo":
+        from curobo_scene import CuroboPerceivedScene
+
+        scene = CuroboPerceivedScene(kin, dt, [d["depth_wrist"].shape[1:], d["depth_cell"].shape[1:]], n_slots=n_slots,
+                                     noise_floor=noise_floor, **(scene_kwargs or {}))
+        tracker = ObjectMomentumTracker([f"obj_{i}" for i in range(n_slots)], np.full(n_slots, 0.1),
+                                        np.full((n_slots, 3), 0.02), window=8)
+        boxes0 = []
+    elif mode == "perceived":
         scene = PerceivedScene(kin, dt, n_slots=n_slots, noise_floor=noise_floor)
         tracker = ObjectMomentumTracker([f"obj_{i}" for i in range(n_slots)], np.full(n_slots, 0.1),
                                         np.full((n_slots, 3), 0.02), window=8)
@@ -156,10 +216,13 @@ def run(d: dict, mode: str = "perceived", lag: int | None = None, horizon: int =
         tracker = ObjectMomentumTracker(names, np.full(len(names), 0.1), d["object_half_extents"].astype(np.float64), window=8)
         boxes0 = [Box(str(nm), tuple(c), tuple(h)) for nm, c, h in zip(d["gt_box_names"], d["gt_box_centers"], d["gt_box_halves"])]
     solver = MomentumSolver(kin, ArmMomentumModel(drive_model(d), dt), tracker, boxes0, horizon, dt)
+    field = getattr(scene, "field", None)
+    solver.static_field = field
 
     alerts, trace = [], {k: [] for k in ("t", "ttc", "confirmed", "alert_point", "alert_label", "hand_path", "slots",
                                           "slot_half", "touch", "tau_score", "perception_ms", "solve_ms", "n_boxes")}
     box_snapshots, map_scores = [], []
+    stage_ms: dict[str, list[float]] = {}
     latency = LatencyEstimator(RobotSelfFilter(kin, inflate=0.01)) if lag is None else None
     lock_t = None if lag is None else 0.0
     lags: list[int] = [] if mode == "perceived" else [lag or 0] * (n - 1)
@@ -248,22 +311,28 @@ def run(d: dict, mode: str = "perceived", lag: int | None = None, horizon: int =
         if scene is not None and scene.boxes_changed:
             box_snapshots.append((t, np.array([[*b.center, *b.half] for b in scene.boxes]).reshape(-1, 6)))
         if scene is not None and i % 120 == 0 and i > 0:
-            m = map_metrics(scene.boxes, d, i)
+            m = field_metrics(field if field is not None else BoxField(scene.boxes), d, i)
             m["t"] = t
             map_scores.append(m)
             if verbose:
                 print(f"[map] t={t:5.1f}s boxes={m['boxes']} precision={m['precision']} coverage={m['coverage']:.2f} "
-                      f"perception {np.mean(tr['perception_ms'][-120:]):.1f} ms solve {np.mean(tr['solve_ms'][-120:]):.2f} ms")
+                      f"perception {np.mean(tr['perception_ms'][-120:]):.1f} ms solve {np.mean(tr['solve_ms'][-120:]):.2f} ms "
+                      f"slots {int(np.isfinite(positions[:, 0]).sum())}", flush=True)
+        if scene is not None:
+            for k, v in scene.timings_ms.items():
+                stage_ms.setdefault(k, []).append(v)
 
     contacts = [{"t": float(t), "a": str(a), "b": str(b)} for t, a, b in zip(d["contact_t"], d["contact_link"], d["contact_other"])]
     contacts = [c for c in contacts if c["t"] <= d["t"][-1]]
     events = contact_events(contacts)
     episodes = alert_episodes([a for a in alerts if a["confirmed"]], dt)
     result = {
-        "mode": mode,
+        "mode": mode if mode == "world" else f"{mode}/{backend}",
         "forecast": score(episodes, events, horizon * dt),
         "map": map_scores,
-        "timing": {"perception": timing_stats(trace["perception_ms"]), "solve": timing_stats(trace["solve_ms"])},
+        "timing": {"perception": timing_stats(trace["perception_ms"]), "solve": timing_stats(trace["solve_ms"]),
+                   # The first frames include one-off kernel compilation and warm-up.
+                   "perception_stages_mean_ms": {k: float(np.mean(v[30:])) for k, v in stage_ms.items()}},
     }
     if scene is not None:
         result["touches"] = scene.touches
@@ -318,11 +387,15 @@ if __name__ == "__main__":
     ap.add_argument("--report", default=None)
     ap.add_argument("--lag", default="auto", help="Depth latency in control steps, or 'auto' to estimate it from the depth")
     ap.add_argument("--no-baseline", action="store_true")
+    ap.add_argument("--backend", choices=("voxel", "curobo"), default="voxel",
+                    help="Static scene: voxel map + boxes (numpy), or cuRobo TSDF/ESDF (GPU)")
+    ap.add_argument("--scene-kwargs", default="{}", help="JSON keyword arguments for the cuRobo scene (tuning)")
     a = ap.parse_args()
     d = load(a.capture)
     lag = None if a.lag == "auto" else int(a.lag)
-    res = run(d, "perceived", lag=lag)
+    res = run(d, "perceived", lag=lag, backend=a.backend, scene_kwargs=json.loads(a.scene_kwargs))
     print(summarize(res))
+    print("stages", json.dumps({k: round(v, 2) for k, v in res["timing"]["perception_stages_mean_ms"].items()}))
     print("tracking", json.dumps(res["tracking"]))
     print("lag", json.dumps(res.get("lag_steps")))
     print("touches", len(res["touches"]), [(round(x["t"], 2), x["link"], round(x["residual"], 2)) for x in res["touches"][:12]])

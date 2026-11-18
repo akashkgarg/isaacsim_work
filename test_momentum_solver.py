@@ -11,6 +11,7 @@ from momentum_solver import (
     MomentumSolver,
     ObjectMomentumTracker,
     Proprioception,
+    StaticField,
     extrapolate_target,
     sphere_box_distance,
 )
@@ -119,6 +120,35 @@ def test_solver_flags_box_in_path():
     # Pitching the shoulder forward drives the hand down into the wall.
     dive = solver.solve(DT, proprio, far, q0 + np.array([0, 0.6, 0, 0, 0, 0, 0, 0, 0]), np.zeros(9), ContactRules())
     assert dive.alert is not None and dive.alert.obstacle == "wall" and dive.alert.model == "commanded"
+
+
+class _Slab(StaticField):
+    """Distance field of one box."""
+
+    def __init__(self, center, half):
+        self.center, self.half = np.asarray(center), np.asarray(half)
+
+    def distance(self, points):
+        return sphere_box_distance(points, 0.0, self.center, self.half)
+
+
+def test_solver_flags_static_field_and_ignore_region():
+    kin = FrankaKinematics()
+    arm = ArmMomentumModel(_drive(), DT)
+    objects = ObjectMomentumTracker(["part"], np.array([0.1]), np.array([[0.02, 0.02, 0.02]]))
+    q0 = np.array([0.0, 0.0, 0.0, -1.8, 0.0, 1.8, 0.8, 0.04, 0.04])
+    hand0 = kin.forward(q0[None], np.eye(4))[0, kin.link_index("panda_hand"), :3, 3]
+    solver = MomentumSolver(kin, arm, objects, [], horizon_steps=60, dt=DT)
+    solver.static_field = _Slab((hand0[0], hand0[1], hand0[2] - 0.2), (0.08, 0.08, 0.02))
+    proprio = Proprioception(q=q0, qd=np.zeros(9), mass_matrix=np.eye(9), coriolis=np.zeros(9), gravity=np.zeros(9), base=np.eye(4))
+    far = np.array([[5.0, 5.0, 0.0]])
+    assert solver.solve(0.0, proprio, far, q0, np.zeros(9), ContactRules()).alert is None
+    dive_q = q0 + np.array([0, 0.6, 0, 0, 0, 0, 0, 0, 0])
+    dive = solver.solve(DT, proprio, far, dive_q, np.zeros(9), ContactRules())
+    assert dive.alert is not None and dive.alert.obstacle == "map"
+    # The same dive is expected when it ends in an ignore region around the contact point.
+    rules = ContactRules(static_ignore=[(np.asarray(dive.alert.point), 0.5)])
+    assert solver.solve(2 * DT, proprio, far, dive_q, np.zeros(9), rules).alert is None
 
 
 if __name__ == "__main__":

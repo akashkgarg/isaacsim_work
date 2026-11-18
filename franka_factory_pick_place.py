@@ -76,6 +76,11 @@ parser.add_argument("--capture", default=None,
 parser.add_argument("--scene", choices=("world", "perceived"), default="world",
                     help="Obstacles for the momentum solver: ground-truth cell boxes and part poses, or a scene "
                          "rebuilt online from the depth cameras and joint torques (scene_perception.py)")
+parser.add_argument("--perception-backend", choices=("voxel", "curobo"), default="voxel",
+                    help="Static scene for --scene perceived: voxel map + boxes (numpy), or cuRobo TSDF/ESDF on the GPU "
+                         "(curobo_scene.py; needs PyTorch and cuRobo, see --curobo-site)")
+parser.add_argument("--curobo-site", default=os.path.expanduser("~/isaacsim_work/deps/site"),
+                    help="Directory with PyTorch and cuRobo installed (pip --target); appended to sys.path")
 parser.add_argument("--depth-lag", default="auto",
                     help="Depth latency in physics steps, or 'auto' to estimate it from the robot's own body in the cell depth")
 args, _ = parser.parse_known_args()
@@ -848,7 +853,16 @@ class MomentumMonitor:
         self.scene: PerceivedScene | None = None
         if args.scene == "perceived":
             # No world knowledge: the solver tracks anonymous object slots and starts with no boxes.
-            self.scene = PerceivedScene(self.kin, PHYSICS_DT, n_slots=PERCEIVED_SLOTS)
+            if args.perception_backend == "curobo":
+                import sys
+
+                sys.path.append(args.curobo_site)
+                from curobo_scene import CuroboPerceivedScene
+
+                shapes = [(h, w) for w, h in (WRIST_CAMERA_RESOLUTION, DEPTH_CELL_RESOLUTION)]
+                self.scene = CuroboPerceivedScene(self.kin, PHYSICS_DT, shapes, n_slots=PERCEIVED_SLOTS, device=f"cuda:{args.gpu}")
+            else:
+                self.scene = PerceivedScene(self.kin, PHYSICS_DT, n_slots=PERCEIVED_SLOTS)
             tracker = ObjectMomentumTracker([f"obj_{i}" for i in range(PERCEIVED_SLOTS)], np.full(PERCEIVED_SLOTS, ITEM_MASS),
                                             np.full((PERCEIVED_SLOTS, 3), 0.02), window=args.history)
             boxes = []
@@ -863,6 +877,7 @@ class MomentumMonitor:
         self.solver = MomentumSolver(self.kin, ArmMomentumModel(drive, PHYSICS_DT), tracker, boxes,
                                      args.horizon_steps, PHYSICS_DT, margin=args.margin, confirm_steps=args.confirm_steps,
                                      uncertainty_scale=args.uncertainty_scale, commanded_alert_steps=args.arm_alert_steps)
+        self.solver.static_field = getattr(self.scene, "field", None)
         self.tote_boxes = {b.name for b in self.solver.boxes if b.name.startswith("tote")}
         # Recent (time, joint positions, phase), oldest first: the depth frames show the robot as
         # it was ``lag`` steps ago, so it must be filtered out at that pose. The lag depends on
@@ -1255,7 +1270,7 @@ class MomentumMonitor:
 
     def perception_summary(self) -> dict:
         """Perceived-scene statistics, scored against ground truth (evaluation only)."""
-        from perception_replay import map_metrics, tracking_error
+        from perception_replay import BoxField, field_metrics, map_metrics, tracking_error
 
         pt = {k: np.asarray(v) for k, v in self.perceived_trace.items()}
         tr = self.trace
@@ -1271,7 +1286,9 @@ class MomentumMonitor:
             "perception_stages_mean_ms": {k: float(np.mean([s.get(k, 0.0) for s in self.perception_stages]))
                                           for k in (self.perception_stages[0] if self.perception_stages else {})},
             "final_boxes": int(pt["n_boxes"][-1]) if pt["n_boxes"].size else 0,
+            "backend": args.perception_backend,
             "map": map_metrics(self.scene.boxes, gt, last),
+            "map_field": field_metrics(self.solver.static_field or BoxField(self.scene.boxes), gt, last),
             "tracking": tracking_error(gt, pt["slots"], lag=pt["lag"]),
             "depth_lag": {"final": int(self.lag), "histogram": np.bincount(pt["lag"]).tolist() if pt["lag"].size else [],
                           "locked_at_s": self.lag_locked_t},
@@ -1331,8 +1348,9 @@ def print_momentum_summary(m: dict) -> None:
               f"models={ep['models']} links={ep['links'][:4]} obstacles={ep['obstacles']}")
     if "perception" in m:
         p = m["perception"]
-        print(f"[perception] mean {p['perception_ms']['mean_ms']:.1f} ms/step, boxes {p['final_boxes']}, map precision "
-              f"{p['map']['precision']} coverage {p['map']['coverage']:.2f}, touches {p['touches']}")
+        mf = p["map_field"]
+        print(f"[perception] backend {p['backend']}, mean {p['perception_ms']['mean_ms']:.1f} ms/step, boxes {p['final_boxes']}, "
+              f"map precision {mf['precision']} coverage {mf['coverage']:.2f} (distance-field metric), touches {p['touches']}")
         print(f"[perception] stages (mean ms) {json.dumps({k: round(v, 2) for k, v in p['perception_stages_mean_ms'].items()})}")
         print(f"[perception] depth lag {json.dumps(p['depth_lag'])}")
         for name, s in p["tracking"].items():

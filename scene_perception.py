@@ -80,7 +80,7 @@ def depth_edges(depth: np.ndarray, jump: float = 0.05, rel: float = 0.04) -> np.
 
 
 def backproject(depth: np.ndarray, K: np.ndarray, cam_to_world: np.ndarray, stride: int = 2,
-                max_range: float = 4.0, drop_edges: bool = True) -> np.ndarray:
+                max_range: float = 4.0, drop_edges: bool = True, return_mask: bool = False):
     """World points ``(M, 3)`` from a depth image (distance to the image plane, m).
 
     USD cameras look down their local -Z axis with +Y up, while image rows grow downward.
@@ -88,6 +88,9 @@ def backproject(depth: np.ndarray, K: np.ndarray, cam_to_world: np.ndarray, stri
     ``((u - cx) z / fx, -(v - cy) z / fy, -z)``. ``stride`` subsamples pixels; every second
     pixel is plenty for 3 cm voxels. Pixels with no return (inf), beyond ``max_range``, or
     on a depth discontinuity (:func:`depth_edges`) are dropped.
+
+    With ``return_mask``, also returns the boolean mask over the subsampled image of the pixels
+    the points came from (points are in row-major pixel order).
     """
     d = depth[::stride, ::stride].astype(np.float64)
     h, w = d.shape
@@ -101,7 +104,8 @@ def backproject(depth: np.ndarray, K: np.ndarray, cam_to_world: np.ndarray, stri
     x = (u[ok] - K[0, 2]) * z / K[0, 0]
     y = -(v[ok] - K[1, 2]) * z / K[1, 1]
     p_cam = np.stack([x, y, -z], axis=1)
-    return p_cam @ cam_to_world[:3, :3].T + cam_to_world[:3, 3]
+    points = p_cam @ cam_to_world[:3, :3].T + cam_to_world[:3, 3]
+    return (points, ok) if return_mask else points
 
 
 def project(points: np.ndarray, K: np.ndarray, cam_to_world: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -784,6 +788,7 @@ def task_rules(phase: str, boxes: list[Box], slot_positions: np.ndarray, pick: n
     if phase in PICK_PHASES and pick is not None:
         rules.ignore_objects = slots_near(pick, 0.10)
         exclude.append((pick, 0.06))
+        rules.static_ignore.append((pick, 0.06))
     if phase in PLACE_PHASES and place is not None:
         rules.ignore_objects |= slots_near(place, 0.10)
     if phase in HOLDING_PHASES and carried_offset is not None:
@@ -793,10 +798,12 @@ def task_rules(phase: str, boxes: list[Box], slot_positions: np.ndarray, pick: n
         if phase == "LIFT" and pick is not None:
             rules.carried_ignore_boxes = {b.name for b in boxes
                                           if np.hypot(*np.maximum(np.abs(np.asarray(b.center[:2]) - pick[:2]) - b.half[:2], 0.0)) < 0.12}
+            rules.carried_static_ignore.append((pick, 0.12))
         elif phase == "DESCEND_PLACE" and place is not None:
             rules.carried_ignore_boxes = {b.name for b in boxes
                                           if np.all(np.abs(np.asarray(b.center[:2]) - place[:2]) <= np.asarray(b.half[:2]) + 0.05)
                                           and b.center[2] + b.half[2] <= place[2] + 0.02}
+            rules.carried_static_ignore.append((place, 0.05))
     return rules, exclude
 
 
@@ -814,6 +821,7 @@ class PerceivedScene:
     """
 
     CARVE_MARGIN = 0.02
+    TOUCH_OFFSET = 0.015  # touch points are moved this far off the arm surface, along its normal
 
     def __init__(self, kin: FrankaKinematics, dt: float, n_slots: int = 8, voxel: float = 0.03,
                  box_every: float = 0.25, contact_threshold: float = 20.0, noise_floor: np.ndarray | None = None):
@@ -861,51 +869,16 @@ class PerceivedScene:
         import time
 
         t_sensor = t if t_sensor is None else t_sensor
-        q_sensor = q if q_sensor is None else q_sensor
-        carried_sensor = carried if q_sensor is q else carried_sensor
         t0 = time.perf_counter()
-        links = self.kin.forward(q[None], base)[0]
-        # Filter with the arm swept over ±1 step around the sensor pose: at 2 m/s the hand moves
-        # 3 cm per step, so a one-step error in the depth timestamp would leak arm points.
-        sweep = q_sensor[None] + np.array([-1.0, 0.0, 1.0])[:, None] * self.dt * qd[None]
-        sweep_links = self.kin.forward(sweep, base)
-        hand_i = self.kin.link_index("panda_hand")
-        s_centers, s_radii, sensor_spheres = [], [], None
-        for k in range(len(sweep)):
-            car = None
-            if carried_sensor is not None:
-                Hs, Hk = sweep_links[1, hand_i], sweep_links[k, hand_i]
-                local = Hs[:3, :3].T @ (carried_sensor[0] - Hs[:3, 3])
-                car = (Hk[:3, :3] @ local + Hk[:3, 3], carried_sensor[1])
-            c_k, r_k = self.filter.spheres(sweep_links[k], car)
-            if k == 1:
-                sensor_spheres = (c_k, r_k)
-            s_centers.append(c_k)
-            s_radii.append(r_k)
-        if q_uncertain is not None:
-            for links_k in self.kin.forward(np.asarray(q_uncertain, dtype=np.float64), base):
-                c_k, r_k = self.filter.spheres(links_k)
-                s_centers.append(c_k)
-                s_radii.append(r_k)
-        s_centers, s_radii = np.vstack(s_centers), np.concatenate(s_radii)
+        links, (s_centers, s_radii), sensor_spheres = self.filter_spheres(q, qd, base, carried, q_sensor,
+                                                                           carried_sensor, q_uncertain)
         pts = [backproject(fr.depth, fr.K, fr.cam_to_world) for fr in frames]
         pts = np.vstack(pts) if pts else np.zeros((0, 3))
         pts = pts[self.filter.keep(pts, s_centers, s_radii)]
         centers, radii = self.filter.spheres(links, carried)
         t1 = time.perf_counter()
 
-        tau_ext = self.contacts.update(t, q, qd, M, c, g, tau_joint)
-        touch = None
-        if self.contacts.in_contact() and not expected_touch:
-            hand = links[self.kin.link_index("panda_hand")]
-            extra = None
-            if carried is not None:
-                extra = (hand[:3, :3].T @ (carried[0] - hand[:3, 3]), carried[1])
-            loc = self.contacts.localize(q, base, tau_ext, extra)
-            if loc is not None and loc["residual"] < 0.35:
-                p = loc["point"] + loc["normal"] * 0.5 * self.map.voxel
-                touch = p[None]
-                self.touches.append({"t": t, **{k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in loc.items()}})
+        touch = self.touch(t, q, qd, M, c, g, tau_joint, base, links, carried, expected_touch)
         t2 = time.perf_counter()
 
         # Carve with a margin: the spheres under-approximate the arm's surface in places, and a
@@ -933,3 +906,53 @@ class PerceivedScene:
         t5 = time.perf_counter()
         self.timings_ms = {"backproject": (t1 - t0) * 1e3, "touch": (t2 - t1) * 1e3, "map": (t3 - t2) * 1e3,
                            "clusters": (t4 - t3) * 1e3, "boxes": (t5 - t4) * 1e3, "total": (t5 - t0) * 1e3}
+
+    def filter_spheres(self, q, qd, base, carried, q_sensor=None, carried_sensor=None, q_uncertain=None):
+        """Robot spheres for self-filtering the depth, and the robot's current spheres.
+
+        Returns ``(links, (filter centers, filter radii), (sensor centers, sensor radii))``:
+        the link transforms at ``q``, every sphere the depth must be filtered against (the
+        sensor pose swept ±1 step, plus every pose in ``q_uncertain``), and the spheres at
+        the sensor pose itself.
+        """
+        q_sensor = q if q_sensor is None else q_sensor
+        carried_sensor = carried if q_sensor is q else carried_sensor
+        links = self.kin.forward(q[None], base)[0]
+        # Filter with the arm swept over ±1 step around the sensor pose: at 2 m/s the hand moves
+        # 3 cm per step, so a one-step error in the depth timestamp would leak arm points.
+        sweep = q_sensor[None] + np.array([-1.0, 0.0, 1.0])[:, None] * self.dt * qd[None]
+        sweep_links = self.kin.forward(sweep, base)
+        hand_i = self.kin.link_index("panda_hand")
+        s_centers, s_radii, sensor_spheres = [], [], None
+        for k in range(len(sweep)):
+            car = None
+            if carried_sensor is not None:
+                Hs, Hk = sweep_links[1, hand_i], sweep_links[k, hand_i]
+                local = Hs[:3, :3].T @ (carried_sensor[0] - Hs[:3, 3])
+                car = (Hk[:3, :3] @ local + Hk[:3, 3], carried_sensor[1])
+            c_k, r_k = self.filter.spheres(sweep_links[k], car)
+            if k == 1:
+                sensor_spheres = (c_k, r_k)
+            s_centers.append(c_k)
+            s_radii.append(r_k)
+        if q_uncertain is not None:
+            for links_k in self.kin.forward(np.asarray(q_uncertain, dtype=np.float64), base):
+                c_k, r_k = self.filter.spheres(links_k)
+                s_centers.append(c_k)
+                s_radii.append(r_k)
+        return links, (np.vstack(s_centers), np.concatenate(s_radii)), sensor_spheres
+
+    def touch(self, t, q, qd, M, c, g, tau_joint, base, links, carried, expected_touch) -> np.ndarray | None:
+        """Update the contact estimator; return the localized touch point ``(1, 3)`` if there is a new one."""
+        tau_ext = self.contacts.update(t, q, qd, M, c, g, tau_joint)
+        if not self.contacts.in_contact() or expected_touch:
+            return None
+        hand = links[self.kin.link_index("panda_hand")]
+        extra = None
+        if carried is not None:
+            extra = (hand[:3, :3].T @ (carried[0] - hand[:3, 3]), carried[1])
+        loc = self.contacts.localize(q, base, tau_ext, extra)
+        if loc is None or loc["residual"] >= 0.35:
+            return None
+        self.touches.append({"t": t, **{k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in loc.items()}})
+        return (loc["point"] + loc["normal"] * self.TOUCH_OFFSET)[None]
