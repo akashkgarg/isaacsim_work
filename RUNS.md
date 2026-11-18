@@ -211,6 +211,10 @@ Offline replays of the four raw captures (`bash runs/curobo/run_all.sh`, then `p
 
 Map precision is 0.79 for cuRobo and 0.80 for voxel, and coverage is 0.94 for both. Lead times match within 0.1 s. Perception takes about 20 ms per step, against about 30 ms for voxel. `runs/curobo/sweep.sh <tag> '<json kwargs>'` replays all captures with other `CuroboPerceivedScene` parameters. Faster frustum decay (0.93, 0.90) adds false alarms.
 
-cuRobo v0.9 is installed with `pip install --target ~/isaacsim_work/deps/site "~/isaacsim_work/deps/curobo[cu13-torch]"`. Replays run under `PYTHONPATH=~/isaacsim_work/deps/site /home/builder/isaacsim/kit/python/bin/python3`. The live script appends `--curobo-site` to `sys.path`. A first live attempt hit the Vulkan device-lost crash during startup, so live numbers are still to come.
+cuRobo v0.9 is installed with `pip install --target ~/isaacsim_work/deps/site "~/isaacsim_work/deps/curobo[cu13-torch]"`. Replays run under `PYTHONPATH=~/isaacsim_work/deps/site /home/builder/isaacsim/kit/python/bin/python3`. The live script appends `--curobo-site` to `sys.path`, and resolves the `cuda` namespace package from there first: cuRobo's `cuda.core` 1.3 needs a newer `cuda.bindings` than the 12.9.4 that Isaac Sim prebundles. A first live attempt hit the Vulkan device-lost crash during startup, so live numbers are still to come.
+
+Isaac Sim startups on one machine are serialized by a file lock (`--startup-lock`, default `/tmp/isaacsim_startup.lock`, `''` disables). Each run holds the lock until its first 90 steps have rendered, so parallel launches start one after another. Concurrent renderer startups coincided with one of the device-lost crashes, but crashes also happen with a single run.
+
+The script declares `__spec__` named `__main__`, so `multiprocessing` spawn/forkserver workers started by libraries (as under `torch.compile`) do not re-run it and boot a second Isaac Sim.
 
 Leave `CUDA_VISIBLE_DEVICES` unset and pick the GPU with `--gpu`. A Vulkan device-lost error ("GPU crash is detected") makes the node health check fail, and Karpenter replaces the node about 10 minutes later. When that happens, stop launching runs and push your work.

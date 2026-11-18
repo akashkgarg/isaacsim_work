@@ -31,11 +31,18 @@ joint-torque contact sensing (``scene_perception.py``). Ground truth is used for
 from __future__ import annotations
 
 import argparse
+import fcntl
+import importlib.machinery
 import json
 import math
 import os
 import random
 import time
+
+if __name__ == "__main__" and __spec__ is None:
+    # multiprocessing "spawn"/"forkserver" workers (started by libraries, e.g. under torch.compile) re-run the
+    # parent's main script unless its spec is named "__main__". Re-running this one boots a second Isaac Sim.
+    __spec__ = importlib.machinery.ModuleSpec("__main__", None)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--headless", action="store_true")
@@ -83,9 +90,30 @@ parser.add_argument("--curobo-site", default=os.path.expanduser("~/isaacsim_work
                     help="Directory with PyTorch and cuRobo installed (pip --target); appended to sys.path")
 parser.add_argument("--depth-lag", default="auto",
                     help="Depth latency in physics steps, or 'auto' to estimate it from the robot's own body in the cell depth")
+parser.add_argument("--startup-lock", default="/tmp/isaacsim_startup.lock",
+                    help="File lock serializing Isaac Sim startups on this machine until the first frames have "
+                         "rendered ('' disables). Concurrent renderer startups coincided with Vulkan device-lost crashes.")
 args, _ = parser.parse_known_args()
 if args.scene == "perceived":
     args.momentum = args.perception = True
+
+startup_lock = None
+if args.startup_lock:
+    startup_lock = open(args.startup_lock, "a")
+    try:
+        fcntl.flock(startup_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"[startup] another Isaac Sim run is starting; waiting on {args.startup_lock}", flush=True)
+        fcntl.flock(startup_lock, fcntl.LOCK_EX)
+
+
+def release_startup_lock() -> None:
+    global startup_lock
+    if startup_lock is not None:
+        fcntl.flock(startup_lock, fcntl.LOCK_UN)
+        startup_lock.close()
+        startup_lock = None
+
 
 from isaacsim import SimulationApp
 
@@ -817,6 +845,24 @@ def quat_to_matrix(position, wxyz) -> np.ndarray:
     return T
 
 
+def prefer_site_cuda(site: str) -> None:
+    """Resolve the ``cuda`` namespace package (``cuda.core``, ``cuda.bindings``) from ``site`` first.
+
+    cuRobo's kernels go through ``cuda.core``, which needs a newer ``cuda.bindings`` than the one
+    Isaac Sim prebundles (``isaacsim.pip.nv``). Both live in the same namespace package, and the
+    prebundled one comes first on ``sys.path``. Must run before anything imports ``cuda.bindings``.
+    """
+    import sys
+
+    import cuda
+
+    site_cuda = os.path.join(os.path.abspath(site), "cuda")
+    loaded = sys.modules.get("cuda.bindings")
+    if loaded is not None and not os.path.abspath(loaded.__file__).startswith(site_cuda):
+        raise RuntimeError(f"cuda.bindings was already imported from {loaded.__file__}; cuRobo needs the one in {site_cuda}")
+    cuda.__path__ = [site_cuda, *(p for p in cuda.__path__ if os.path.abspath(p) != site_cuda)]
+
+
 class MomentumMonitor:
     """Runs the momentum solver every control step, injects faults, and records ground-truth contacts."""
 
@@ -857,6 +903,7 @@ class MomentumMonitor:
                 import sys
 
                 sys.path.append(args.curobo_site)
+                prefer_site_cuda(args.curobo_site)
                 from curobo_scene import CuroboPerceivedScene
 
                 shapes = [(h, w) for w, h in (WRIST_CAMERA_RESOLUTION, DEPTH_CELL_RESOLUTION)]
@@ -1450,6 +1497,7 @@ def main() -> int:
     settle = 0
     while simulation_app.is_running() and settle < 90:
         settle += int(step())
+    release_startup_lock()
 
     if args.preview:
         views = [
